@@ -22,7 +22,7 @@ from sqlite3 import IntegrityError
 
 import json
 import re
-import requests
+import urllib2
 
 import fiona
 import shapely
@@ -38,6 +38,7 @@ from geoalchemy2.elements import _SpatialElement, WKTElement
 
 from db2 import SQLiteDB
 
+
 if sys.platform.startswith("linux"):
     #MOD_SPATIALITE = "mod_spatialite"
     MOD_SPATIALITE = "/usr/local/lib/mod_spatialite.so"
@@ -45,67 +46,41 @@ else:
     MOD_SPATIALITE = "mod_spatialite"
 
 
-# URL to Spatial Reference System (srs) string
-_site = "https://spatialreference.org/ref/{auth}/{srid}/{fmt}/"
-
-# Supported Authorities
-_authorities = ["epsg", "esri", "sr-org"]
-
-# Supported Formats
-_formats = [
-    'html',
-    'prettywkt',
-    'proj4',
-    'json',
-    'gml',
-    'esriwkt',
-    'mapfile',
-    'mapserverpython',
-    'mapnik',
-    'mapnikpython',
-    'geoserver',
-    'postgis',
-    'spatialite',  # Customized in the get function: derrivitive of PostGIS
-    'proj4js'
-    ]
-
-
-class SpatialReferenceResponse(object):
-    """Response object returned by spatialreferenceapi.get()."""
-    def __init__(self, auth, srid, sr_format, text):
-        self.auth = auth
-        self.srid = srid
-        self.sr_format = sr_format
-        self.text = text
-        self.url = _site.format(auth=auth, srid=srid, fmt=sr_format)
-
-    def to_json(self):
-        """Returns the object as a json string."""
-        return json.dumps(self.__dict__)
-
-    def __getitem__(self, key):
-        # Allow the object to be treated as a dictionary supporting:
-        #  sr["srid"] == 102700
-        return getattr(self, key)
-
-    def __str__(self):
-        return self.to_json()
-
-    def __repr__(self):
-        return "<SpatialReferenceResponse(SRID={})>".format(self.srid)
-
-
-def get_spatialreference_data(srid, auth, sr_format, raise_errors=True):
-    """GET function for spatialreference.org.
-    Args:
-        srid (int/str): Spatial Reference ID
-        auth (str): Spatial Reference Authority
-        sr_format (str): the requested format of the spatial reference info
-        raise_errors (bool): Turn raising errors on/off (default: True)
-    Returns a SpatialReferenceResponse object with the requested format of the
-    spatial reference system.
+def get_sr_from_web(srid, auth, sr_format):
     """
-    site = "https://spatialreference.org/ref/{0}/{1}/{2}/"
+    Get spatial reference data from spatialreference.org
+
+    Parameters
+    ----------
+    srid: int
+        Spatial Reference ID
+    auth: str
+        Name of authority {epsg, esri, sr-org}
+    sr_format: str
+        Desired format of spatial reference data
+    """
+    _formats = [
+        'html',
+        'prettywkt',
+        'proj4',
+        'json',
+        'gml',
+        'esriwkt',
+        'mapfile',
+        'mapserverpython',
+        'mapnik',
+        'mapnikpython',
+        'geoserver',
+        'postgis',
+        'spatialite',  # Derivative of PostGIS
+        'proj4js'
+        ]
+
+    _authorities = [
+        "epsg",
+        "esri",
+        "sr-org"]
+
     # Validate inputs
     srid = int(srid)
     auth = auth.lower()
@@ -114,26 +89,18 @@ def get_spatialreference_data(srid, auth, sr_format, raise_errors=True):
         raise ValueError("{} is not a valid authority".format(auth))
     if sr_format not in _formats:
         raise ValueError("{} is not a valid format".format(sr_format))
+    site = "https://spatialreference.org/ref/{0}/{1}/{2}/".format(auth, srid, sr_format)
 
-    # SpatiaLite is PostGIS with an alteration
+    # SpatiaLite (derive from PostGIS)
     if sr_format == "spatialite":
-        r = requests.get(site.format(auth, srid, "postgis"))
-        txt = re.sub("9{}".format(srid), str(srid), r.text, count=1)
-    # All other types
+        site = site.replace("spatialite", "postgis")
+        data = urllib2.urlopen(site).read()
+        # The srid value has a leading 9 in the PostGIS INSERT statement
+        data = re.sub("9{}".format(srid), str(srid), data, count=1)
     else:
-        r = requests.get(site.format(auth, srid, sr_format))
-        txt = r.text
+        data = urllib2.urlopen(site).read()
+    return data
 
-    # Raise errors on unsuccessful calls (if raise_errors is True)
-    if raise_errors:
-        if r.status_code == 404:
-            raise requests.HTTPError("404 - Not Found")
-        elif r.status_code != 200:
-            raise requests.HTTPError("Error: Status Code {}".format(
-                r.status_code))
-
-    # Return the response as a customized object
-    return SpatialReferenceResponse(auth, srid, sr_format, txt)
 
 '''
 class _ColumnFactory():
@@ -173,39 +140,47 @@ class SpatiaLiteBlobElement(object):
     SpatiaLite Blob Element
     """
     def __init__(self, geom_buffer):
+        """
+        Decodes a SpatiaLite BLOB geometry into a Spatial Reference and Well Known Binary
+
+        Parameters
+        ----------
+        geom_buffer: buffer
+            The geometry type native to SpatiaLite (BLOB geometry)
+        """
         self.blob = geom_buffer
         # Get as bytearray
         array = bytearray(geom_buffer)
         # List of Big- or Little-Endian identifiers
         endian = [">", "<"][array[1]]
-        # Decode the Spatial Reference ID;  # Could be returned
+
+        # Decode the Spatial Reference ID
         self.srid = "{}".format(struct.unpack(endian + 'i', array[2:6])[0])
+
         # Create WKB from Endian (pos 1) and SpatiaLite-embeded WKB data at pos 39+
         self.wkb = str(geom_buffer[1] + array[39:-1])
 
-    def __repr__(self):
+    @property
+    def as_shapely(self):
+        """Return SpatiaLite BLOB as shapely object."""
         return shapely.wkb.loads(self.wkb)
 
+    @property
+    def as_wkt(self):
+        """Return SpatiaLite BLOB as Well Known Text."""
+        return shapely.wkt.dumps(self.as_shapely)
+
+    @property
+    def as_ewkt(self):
+        """Return SpatiaLite BLOB as Extended Well-Known Text."""
+        return "SRID={};{}".format(self.srid, self.as_wkt)
+
     def __str__(self):
-        return shapely.wkt.dumps(self.__repr__())
-
-    @property
-    def wkt(self):
-        """
-        Well-Known Text
-        """
-        return self.__str__()
-
-    @property
-    def ewkt(self):
-        """
-        Extended Well-Known Text
-        """
-        return "SRID={};{}".format(self.srid, self.wkt)
+        return self.ewkt
 
 
 class GeoDataFrameToSQLHandler(object):
-    def __init__(self, gdf, table_name, primary_key="", srid=-1, dim="XY", from_text="ST_GeomFromText"):
+    def __init__(self, gdf, table_name, srid=-1, primary_key="", from_text="ST_GeomFromText", cast_to_multi=False):
         self.gdf = gdf.copy()
         self.table_name = table_name
         self.primary_key = "PK_UID" if not primary_key else primary_key
@@ -213,8 +188,24 @@ class GeoDataFrameToSQLHandler(object):
             _new_cols = self.gdf.columns.insert(0, self.primary_key)
             self.gdf[self.primary_key] = xrange(0, len(self.gdf))
             self.gdf = self.gdf[_new_cols]
+
+        # Check for multiple geometry types
+        geom_types = list(set(gdf["geometry"].geom_type))
+        if len(geom_types) > 1:
+            # Cast all to Multi type
+            if cast_to_multi is True:
+                self.gdf["geometry"] = self.gdf["geometry"].apply(lambda x: gpd.tools.collect(x, True))
+            else:
+                raise IntegrityError("only geometries of a single type are allowed. Found: {}".format(geom_types))
+
+        # Handle SRIDs
         self.srid = srid
-        self.dim = dim
+        # Get SRID from GeoDataFrame if in the crs
+        if self.srid == -1 and self.gdf.crs["init"].startswith("epsg"):
+            self.srid = int(self.gdf.crs["init"].split(":")[1])
+
+        self.dim = list(set(self.gdf["geometry"].apply(lambda x: x._ndim)))[0]
+
         self.from_text = from_text
         self.sql_types = {"str": "TEXT", "int": "INTEGER", "float": "REAL"}
         self.schema = infer_schema(self.gdf)
@@ -302,65 +293,92 @@ class SpatiaLiteDB(SQLiteDB):
         if "geometry_columns" not in self.table_names:
             # Source: geoalchemy2 readthedocs tutorial
             self.con.execute(select([func.InitSpatialMetaData(1)]))
-            #self.con.execute("SELECT InitSpatialMetaData(1);")
 
-    def load_geodataframe(self, gdf, table_name, primary_key="", srid=-1, dim="XY", from_text="ST_GeomFromText"):
+    def has_srid(self, srid):
+        """Check if a spatial reference system is in the database."""
+        return len(self.engine.execute("SELECT * FROM spatial_ref_sys WHERE srid=?", (srid,)).fetchall()) == 1
+
+
+    def load_geodataframe(self, gdf, table_name, srid=-1, primary_key=""):
         """
         Create a spatial table from a geopandas.GeoDataFrame
 
         """
-        geom_types = [t.__name__ for t in list(set(gdf["geometry"].apply(type)))]
-        if len(geom_types) > 1:
-            # TODO: fix_types option to correct multi types
-            raise IntegrityError("only geometries of a single type are allowed. Found: {}".format(geom_types))
-        gdf_sql = GeoDataFrameToSQLHandler(gdf, table_name, primary_key, srid, dim, from_text)
+        if not self.has_srid(srid):
+            self.get_spatial_ref_sys(srid)
+        gdf_sql = GeoDataFrameToSQLHandler(gdf, table_name, srid, primary_key, cast_to_multi=True)
         return gdf_sql.execute(self)
 
-    def get_spatial_ref_sys(self, srid, auth="epsg", insert=True):
-        sr = get_spatialreference_data(srid, auth, "spatialite")
-        if insert:
-            self.engine.execute(sr.text)
-            return
-        return sr
+    def get_spatial_ref_sys(self, srid, auth="esri"):
+        """
+        Execute the INSERT statement for the spatial reference data from spatialreference.org
+        Does nothing if the spatial reference data exists
+
+        Parameters
+        ----------
+        srid: int
+            Spatial Reference ID
+        auth: str
+            Name of authority {epsg, esri, sr-org}
+            Default 'esri' because spatial_ref_sys table already has most epsg spatial references
+        """
+        if self.has_srid(srid):
+            return 0
+        sr_data = get_sr_from_web(srid, auth, "spatialite")
+        self.engine.execute(sr_data)
+        return 1
 
     def sql(self, q, data=None, union=True, limit=None):
-        q = unicode(q)
+        """"""
+        # Execute the query using the sql method of the super class
+        df = super(SpatiaLiteDB, self).sql(q, data, union, limit)
 
-        if data:
-            q = self._apply_handlebars(q, data, union)
-        if limit:
-            q = self._assign_limit(q, limit)
-
-        # Execute multiple statements individually
-        if isinstance(data, list) and union is False:
-            dataframes = []
-            for qi in q.split(";"):
-                qi = qi.strip()
-                if qi:
-                    try:
-                        dataframes.append(pd.read_sql(qi, self.con))
-                    except ResourceClosedError:
-                        dataframes.append(pd.DataFrame(data=[[qi, 1]], columns=["SQL", "Result"]))
-            df = pd.concat(dataframes).reset_index(drop=True)
-
-        else:
-            try:
-                # Return query results
-                df = pd.read_sql(q, self.con)
-
-            except ResourceClosedError:
-                # Return a DataFrame indicating successful statement
-                df = pd.DataFrame(data=[[q, 1]], columns=["SQL", "Result"])
-
+        # Post-process the dataframe
         if "geometry" in df.columns:
+            # Decode SpatiaLite BLOB and
             df["geometry"] = df["geometry"].apply(SpatiaLiteBlobElement)
+            # Get Spatial Reference while geometry values are SpatiaLiteBlobElement objects
+            srid = df["geometry"].iat[0].srid
+            # Convert SpatiaLiteBlobElement to shapely object
+            df["geometry"] = df["geometry"].apply(lambda x: x.as_shapely)
+            # Convert to GeoDataFrame
+            df = gpd.GeoDataFrame(df)
+
+            # Get spatial reference authority and proj4text
+            auth, proj = self.engine.execute(
+                "SELECT auth_name, proj4text FROM spatial_ref_sys WHERE auth_srid = ?",
+                (srid,)
+                ).fetchone()
+
+            # Set crs attribute of GeoDataFrame
+            if auth != "epsg":
+                df.crs = fiona.crs.from_string(proj)
+            else:
+                df.crs = fiona.crs.from_epsg(srid)
         return df
 
     @property
     def geometries(self):
-        return self.sql("SELECT * FROM geometry_columns")
+        return self.sql("SELECT * FROM geometry_columns g LEFT JOIN spatial_ref_sys s ON g.srid=s.srid")
+
+    def __str__(self):
+        return "SpatialDB[SQLite/SpatiaLite] > {dbname}".format(dbname=self.dbname)
+
+    def __repr__(self):
+        return self.__str__()
+
 
 '''
 type(table_name,(declarative_base(bind=self.engine),),
             {"__tablename__": table_name, "__table_args__": {"autoload": True}})
+'''
+
+'''
+class SpatiaLiteDB(SpatialDB):
+    def __init__(self):
+
+
+class PostGISDB(SpatialDB):
+    def __init__(self):
+        super(PostGISDB, )
 '''

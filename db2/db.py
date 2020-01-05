@@ -90,10 +90,8 @@ class DB(object):
                  port=None, dbname=None, dbtype=None, driver=None,
                  encoding="utf8", echo=False, extensions=[]):  # , *args, **kwargs):
         """"""
-        # Employ a configuration dictionary to keep the API tidy
-        self._config = {
-            "encoding": encoding,
-            "connection_data": {
+        self._encoding = encoding
+        self._connection_data = {
                 "user": username,
                 "pwd": password,
                 "host": hostname,
@@ -102,7 +100,6 @@ class DB(object):
                 "dbtype": str(dbtype).lower() if dbtype else None,
                 "driver": str(driver).lower() if driver else None
                 }
-            }
         self._echo = echo
         self._extensions = extensions
 
@@ -110,12 +107,12 @@ class DB(object):
         if url:
             self._url = url
         else:
-            self._url = DB._create_url(**self._config["connection_data"])
+            self._url = DB._create_url(**self._connection_data)
 
         # Create engine
         self.engine = create_engine(self._url)
 
-        # Load extensions
+        # Load extensions  # TODO: is this SQLite-specific?
         if self._extensions:
             listen(self.engine, 'connect', self._load_extensions)
 
@@ -131,8 +128,8 @@ class DB(object):
 
     @staticmethod
     def _create_url(**kwargs):
-        """Unpacks a dictionary of a DB object's connection data to create a
-        database URL.
+        """
+        Unpacks a dictionary of a DB object's connection data to create a database URL.
 
         Example
         -------
@@ -168,6 +165,10 @@ class DB(object):
         return
 
     @property
+    def dbname(self):
+        return self._connection_data["dbname"]
+
+    @property
     def table_names(self):
         """
         A list of tables in the database (alias for self.engine.table_names())
@@ -199,7 +200,7 @@ class DB(object):
     def _assign_limit(self, q, limit=1000):
         q = q.rstrip().rstrip(";")
 
-        if self._config["connection_data"]["dbtype"] == "mssql":
+        if self._connection_data["dbtype"] == "mssql":
             new = "SELECT TOP {limit} * FROM ({q}) q"
         else:
             new = "SELECT * FROM ({q}) q LIMIT {limit}"
@@ -238,7 +239,7 @@ class DB(object):
             return q
         return query
 
-    def sql(self, q, data=None, union=True, limit=None, func=None):
+    def sql(self, q, data=None, union=True, limit=None):
         """
         Execute an SQL query or statement
 
@@ -301,8 +302,6 @@ class DB(object):
             except ResourceClosedError:
                 # Return a DataFrame indicating successful statement
                 df = pd.DataFrame(data=[[q, 1]], columns=["SQL", "Result"])
-        if func:
-            return func(df)
         return df
 
     def create_mapping(self, mapping):
@@ -468,13 +467,23 @@ class SQLiteDB(DB):
             echo=echo,
             extensions=extensions)
 
+    def __str__(self):
+        return "SQLite[SQLite] > {dbname}".format(dbname=self.dbname)
+
 
 class PostgresDB(DB):
     def __init__(self, username, password, hostname, dbname, dbtype="postgres",
                  port=5432, schemas=None, profile="default",
                  exclude_system_tables=True, limit=1000, keys_per_column=None,
                  driver="psycopg2"):
-        super(PostgresDB, self).__init__()
+        super(PostgresDB, self).__init__(
+            username=username,
+            password=password,
+            hostname=hostname,
+            dbname=dbname,
+            dbtype="postgres",
+            driver=driver,
+            echo=echo)
 
 
 class MSSQLDB(DB):
