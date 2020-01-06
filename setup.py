@@ -4,6 +4,10 @@
 
 from setuptools import setup, find_packages
 
+# NOTES:
+# coverage run --source db2 -m py.test; coverage html
+#
+
 with open('README.rst') as readme_file:
     readme = readme_file.read()
 
@@ -14,22 +18,23 @@ requirements = ['Click>=7.0', ]
 
 setup_requirements = ['pytest-runner', ]
 
-test_requirements = ['pytest>=3', ]
+test_requirements = ['pytest>=3', 'coverage']
 
 setup(
     author="Garin Wally",
     author_email='garwall101@gmail.com',
-    python_requires='>=3.5',
+    python_requires='>=2.7',
     classifiers=[
         'Development Status :: 2 - Pre-Alpha',
         'Intended Audience :: Developers',
         'License :: OSI Approved :: BSD License',
         'Natural Language :: English',
-        'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.5',
-        'Programming Language :: Python :: 3.6',
-        'Programming Language :: Python :: 3.7',
-        'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 2.7'
+        #'Programming Language :: Python :: 3',
+        #'Programming Language :: Python :: 3.5',
+        #'Programming Language :: Python :: 3.6',
+        #'Programming Language :: Python :: 3.7',
+        #'Programming Language :: Python :: 3.8',
     ],
     description="Python Boilerplate contains all the boilerplate you need to create a Python package.",
     entry_points={

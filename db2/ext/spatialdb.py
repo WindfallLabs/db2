@@ -15,32 +15,24 @@ export C_INCLUDE_PATH=/usr/include/gdal
 pip install GDAL==$(gdal-config --version) --global-option=build_ext --global-option="-I/usr/include/gdal"
 """
 
+import re
 import struct
 import sys
+import urllib2
 from collections import OrderedDict
 from sqlite3 import IntegrityError
 
-import json
-import re
-import urllib2
-
 import fiona
-import shapely
-import pandas as pd
 import geopandas as gpd
+import pandas as pd
+import shapely
 from geopandas.io.file import infer_schema
-from sqlalchemy import Column, Text, Integer, Float
 from sqlalchemy import func, select
-from sqlalchemy.exc import ResourceClosedError
-from sqlalchemy.ext.declarative import declarative_base
-from geoalchemy2 import Geometry
-from geoalchemy2.elements import _SpatialElement, WKTElement
 
-from db2 import SQLiteDB
+from .. import SQLiteDB
 
 
 if sys.platform.startswith("linux"):
-    #MOD_SPATIALITE = "mod_spatialite"
     MOD_SPATIALITE = "/usr/local/lib/mod_spatialite.so"
 else:
     MOD_SPATIALITE = "mod_spatialite"
@@ -89,7 +81,8 @@ def get_sr_from_web(srid, auth, sr_format):
         raise ValueError("{} is not a valid authority".format(auth))
     if sr_format not in _formats:
         raise ValueError("{} is not a valid format".format(sr_format))
-    site = "https://spatialreference.org/ref/{0}/{1}/{2}/".format(auth, srid, sr_format)
+    site = "https://spatialreference.org/ref/{0}/{1}/{2}/".format(
+        auth, srid, sr_format)
 
     # SpatiaLite (derive from PostGIS)
     if sr_format == "spatialite":
@@ -141,7 +134,9 @@ class SpatiaLiteBlobElement(object):
     """
     def __init__(self, geom_buffer):
         """
-        Decodes a SpatiaLite BLOB geometry into a Spatial Reference and Well Known Binary
+        Decodes a SpatiaLite BLOB geometry into a Spatial Reference and
+        Well-Known Binary representation
+        See specification: https://www.gaia-gis.it/gaia-sins/BLOB-Geometry.html
 
         Parameters
         ----------
@@ -157,7 +152,8 @@ class SpatiaLiteBlobElement(object):
         # Decode the Spatial Reference ID
         self.srid = "{}".format(struct.unpack(endian + 'i', array[2:6])[0])
 
-        # Create WKB from Endian (pos 1) and SpatiaLite-embeded WKB data at pos 39+
+        # Create WKB from Endian (pos 1) and SpatiaLite-embeded WKB data
+        # at pos 39+
         self.wkb = str(geom_buffer[1] + array[39:-1])
 
     @property
@@ -180,7 +176,8 @@ class SpatiaLiteBlobElement(object):
 
 
 class GeoDataFrameToSQLHandler(object):
-    def __init__(self, gdf, table_name, srid=-1, primary_key="", from_text="ST_GeomFromText", cast_to_multi=False):
+    def __init__(self, gdf, table_name, srid=-1, primary_key="",
+                 from_text="ST_GeomFromText", cast_to_multi=False):
         self.gdf = gdf.copy()
         self.table_name = table_name
         self.primary_key = "PK_UID" if not primary_key else primary_key
@@ -194,9 +191,11 @@ class GeoDataFrameToSQLHandler(object):
         if len(geom_types) > 1:
             # Cast all to Multi type
             if cast_to_multi is True:
-                self.gdf["geometry"] = self.gdf["geometry"].apply(lambda x: gpd.tools.collect(x, True))
+                self.gdf["geometry"] = self.gdf["geometry"].apply(
+                    lambda x: gpd.tools.collect(x, True))
             else:
-                raise IntegrityError("only geometries of a single type are allowed. Found: {}".format(geom_types))
+                raise IntegrityError(
+                    "only geometries of a single type are allowed. Found: {}".format(geom_types))
 
         # Handle SRIDs
         self.srid = srid
@@ -209,7 +208,9 @@ class GeoDataFrameToSQLHandler(object):
         self.from_text = from_text
         self.sql_types = {"str": "TEXT", "int": "INTEGER", "float": "REAL"}
         self.schema = infer_schema(self.gdf)
-        self.column_types = OrderedDict([[k, self.sql_types[v]] for k, v in self.schema["properties"].items()])
+        self.column_types = OrderedDict(
+            [[k, self.sql_types[v]] for k, v in
+             self.schema["properties"].items()])
         if isinstance(self.schema["geometry"], list):
             self.geom_type = max(self.schema["geometry"], key=len).upper()
         else:
@@ -220,7 +221,8 @@ class GeoDataFrameToSQLHandler(object):
     def col_str(self):
         cols = self.column_types.copy()
         cols[self.primary_key] = cols[self.primary_key] + " PRIMARY KEY"
-        col_str = "({})".format(", ".join([" ".join([k, v]) for k, v in cols.items()]))
+        col_str = "({})".format(", ".join(
+            [" ".join([k, v]) for k, v in cols.items()]))
         return col_str
 
     @property
@@ -241,7 +243,8 @@ class GeoDataFrameToSQLHandler(object):
 
     @property
     def insert_sql(self):
-        return "INSERT INTO {} ({}) VALUES ({});".format(self.table_name, ", ".join(self.gdf.columns), self._qmarks)
+        return "INSERT INTO {} ({}) VALUES ({});".format(
+            self.table_name, ", ".join(self.gdf.columns), self._qmarks)
 
     @property
     def _qmarks(self):
@@ -255,18 +258,22 @@ class GeoDataFrameToSQLHandler(object):
         if db._echo:
             print(self.create_sql)
         db.session.execute(self.create_sql)
-        dataframes.append(pd.DataFrame(data=[[self.create_sql, 1]], columns=["SQL", "Result"]))
+        dataframes.append(pd.DataFrame(
+            data=[[self.create_sql, 1]], columns=["SQL", "Result"]))
         if db._echo:
             print(self.add_geom_col_sql)
         db.session.execute(self.add_geom_col_sql)
-        dataframes.append(pd.DataFrame(data=[[self.add_geom_col_sql, 1]], columns=["SQL", "Result"]))
+        dataframes.append(pd.DataFrame(
+            data=[[self.add_geom_col_sql, 1]], columns=["SQL", "Result"]))
         db.session.commit()
         if db._echo:
             print("INSERTing {} rows using:".format(len(self.gdf)))
             print(self.insert_sql)
         for row in self.gdf.apply(OrderedDict, axis=1):
             db.con.execute(self.insert_sql, row.values())
-        dataframes.append(pd.DataFrame(data=[[self.insert_sql, len(self.gdf)]], columns=["SQL", "Result"]))
+        dataframes.append(pd.DataFrame(
+            data=[[self.insert_sql, len(self.gdf)]],
+            columns=["SQL", "Result"]))
         return pd.concat(dataframes).reset_index(drop=True)
 
 
@@ -296,23 +303,25 @@ class SpatiaLiteDB(SQLiteDB):
 
     def has_srid(self, srid):
         """Check if a spatial reference system is in the database."""
-        return len(self.engine.execute("SELECT * FROM spatial_ref_sys WHERE srid=?", (srid,)).fetchall()) == 1
+        return len(self.engine.execute(
+            "SELECT * FROM spatial_ref_sys WHERE srid=?", (srid,)
+            ).fetchall()) == 1
 
 
     def load_geodataframe(self, gdf, table_name, srid=-1, primary_key=""):
         """
         Create a spatial table from a geopandas.GeoDataFrame
-
         """
         if not self.has_srid(srid):
             self.get_spatial_ref_sys(srid)
-        gdf_sql = GeoDataFrameToSQLHandler(gdf, table_name, srid, primary_key, cast_to_multi=True)
+        gdf_sql = GeoDataFrameToSQLHandler(
+            gdf, table_name, srid, primary_key, cast_to_multi=True)
         return gdf_sql.execute(self)
 
     def get_spatial_ref_sys(self, srid, auth="esri"):
         """
-        Execute the INSERT statement for the spatial reference data from spatialreference.org
-        Does nothing if the spatial reference data exists
+        Execute the INSERT statement for the spatial reference data from
+        spatialreference.org. Does nothing if the spatial reference data exists
 
         Parameters
         ----------
@@ -320,7 +329,8 @@ class SpatiaLiteDB(SQLiteDB):
             Spatial Reference ID
         auth: str
             Name of authority {epsg, esri, sr-org}
-            Default 'esri' because spatial_ref_sys table already has most epsg spatial references
+            Default 'esri' because spatial_ref_sys table already has most epsg
+            spatial references
         """
         if self.has_srid(srid):
             return 0
@@ -337,7 +347,8 @@ class SpatiaLiteDB(SQLiteDB):
         if "geometry" in df.columns:
             # Decode SpatiaLite BLOB and
             df["geometry"] = df["geometry"].apply(SpatiaLiteBlobElement)
-            # Get Spatial Reference while geometry values are SpatiaLiteBlobElement objects
+            # Get Spatial Reference while geometry values are
+            # SpatiaLiteBlobElement objects
             srid = df["geometry"].iat[0].srid
             # Convert SpatiaLiteBlobElement to shapely object
             df["geometry"] = df["geometry"].apply(lambda x: x.as_shapely)
@@ -359,10 +370,12 @@ class SpatiaLiteDB(SQLiteDB):
 
     @property
     def geometries(self):
+        """Return the contents of table `geometry_columns` and srs info."""
         return self.sql("SELECT * FROM geometry_columns g LEFT JOIN spatial_ref_sys s ON g.srid=s.srid")
 
     def __str__(self):
-        return "SpatialDB[SQLite/SpatiaLite] > {dbname}".format(dbname=self.dbname)
+        return "SpatialDB[SQLite/SpatiaLite] > {dbname}".format(
+            dbname=self.dbname)
 
     def __repr__(self):
         return self.__str__()
@@ -373,11 +386,8 @@ type(table_name,(declarative_base(bind=self.engine),),
             {"__tablename__": table_name, "__table_args__": {"autoload": True}})
 '''
 
+# TODO: make SpatialDB superclass or abstract class(?)
 '''
-class SpatiaLiteDB(SpatialDB):
-    def __init__(self):
-
-
 class PostGISDB(SpatialDB):
     def __init__(self):
         super(PostGISDB, )

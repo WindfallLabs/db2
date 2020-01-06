@@ -4,13 +4,7 @@
 Module Docstring
 """
 
-__author__ = "Garin Wally"
-__version__ = "0.1.0"
-__license__ = "MIT"
-
-
 import sys
-from collections import OrderedDict
 
 try:
     from urllib import quote_plus
@@ -24,7 +18,6 @@ from sqlalchemy.event import listen
 from sqlalchemy.exc import ResourceClosedError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.schema import MetaData
 
 from .utils import RowConverter
 
@@ -35,63 +28,45 @@ class DB(object):
     """
     Utility for exploring and querying a database.
     Adapted from code originally written by yhat for use with SQLAlchemy.
-
-    Parameters
-    ----------
-    url: str
-        The DB-API URL string used to connect to the database
-    username: str
-        Your username for the database
-    password: str
-        Your password for the database
-    hostname: str
-        Hostname your database is running on (i.e. "localhost", "10.20.1.248")
-    port: int
-        Port the database is running on. defaults to default port for db.
-            portgres: 5432
-            redshift: 5439
-            mysql: 3306
-            sqlite: n/a
-            mssql: 1433
-    dbname: str
-        Name of the database or path to sqlite database
-    dbtype: str
-        Type of database (i.e. dialect)
-    schemas: list
-        List of schemas to include. Defaults to all.
-    profile: str
-        Preconfigured database credentials / profile for how you like your
-        queries
-    exclude_system_tables: bool
-        Whether or not to include "system" tables (the ones that the database
-        needs in order to operate). This includes things like schema
-        definitions. Most of you probably don't need this, but if you're a db
-        admin you might actually want to query the system tables.
-    limit: int, None
-        Default number of records to return in a query. This is used by the
-        DB.query method. You can override it by adding limit={X} to the `query`
-        method, or by passing an argument to `DB()`. None indicates that there
-        will be no limit (That's right, you'll be limitless. Bradley Cooper
-        style.)
-    keys_per_column: int, None
-        Default number of keys to display in the foreign and reference keys.
-        This is used to control the rendering of PrettyTable a bit. None means
-        that you'll have verrrrrrrry wide columns in some cases.
-    driver: str, None
-        Driver for mssql/pyodbc connections.
-    encoding: str
-        Specify the encoding.
-    echo: bool
-        Whether or not to repeat queries and messages back to user
-    extensions: list
-        List of extensions to load on connection
     """
     def __init__(self, url=None, username=None, password=None, hostname=None,
                  port=None, dbname=None, dbtype=None, driver=None,
-                 encoding="utf8", echo=False, extensions=[]):  # , *args, **kwargs):
-        """"""
+                 encoding="utf8", echo=False, extensions=[]):
+        """
+
+        Parameters
+        ----------
+        url: str
+            The DB-API URL string used to connect to the database
+        username: str
+            Your username for the database
+        password: str
+            Your password for the database
+        hostname: str
+            Hostname your database is running on
+            (i.e. "localhost", "10.20.1.248")
+        port: int
+            Port the database is running on. defaults to default port for db.
+                postgres: 5432
+                redshift: 5439
+                mysql: 3306
+                sqlite: n/a
+                mssql: 1433
+        dbname: str
+            Name of the database or path to sqlite database
+        dbtype: str
+            Type of database (i.e. dialect)
+        driver: str, None
+            Driver for mssql/pyodbc connections.
+        encoding: str
+            Specify the encoding.
+        echo: bool
+            Whether or not to repeat queries and messages back to user
+        extensions: list
+            List of extensions to load on connection
+        """
         self._encoding = encoding
-        self._connection_data = {
+        self.credentials = {
                 "user": username,
                 "pwd": password,
                 "host": hostname,
@@ -107,7 +82,7 @@ class DB(object):
         if url:
             self._url = url
         else:
-            self._url = DB._create_url(**self._connection_data)
+            self._url = DB._create_url(**self.credentials)
 
         # Create engine
         self.engine = create_engine(self._url)
@@ -129,7 +104,8 @@ class DB(object):
     @staticmethod
     def _create_url(**kwargs):
         """
-        Unpacks a dictionary of a DB object's connection data to create a database URL.
+        Unpacks a dictionary of a DB object's connection data to create a
+        database URL.
 
         Example
         -------
@@ -149,7 +125,8 @@ class DB(object):
             return "sqlite:///{}".format(kwargs["dbname"])
         # MSSQL
         elif kwargs["dbtype"] == "mssql":
-            mstemp = 'DRIVER={driver};SERVER={host};DATABASE={dbname};UID={user};PWD={pwd}'
+            mstemp = ('DRIVER={driver};SERVER={host};DATABASE={dbname};'
+                      'UID={user};PWD={pwd}')
             params = quote_plus(mstemp.format(**kwargs))
             return "mssql+pyodbc:///?odbc_connect={}".format(params)
         # Others
@@ -166,7 +143,11 @@ class DB(object):
 
     @property
     def dbname(self):
-        return self._connection_data["dbname"]
+        return self.credentials["dbname"]
+
+    @property
+    def dbtype(self):
+        return self.credentials["dbtype"]
 
     @property
     def table_names(self):
@@ -191,16 +172,18 @@ class DB(object):
         >>> assert d.engine.execute("SELECT * FROM Artist").fetchall() == [(1, "AC/DC")]
         """
         if table_name not in self.table_names:
-            raise AttributeError("target table '{}' does not exist".format(table_name))
+            raise AttributeError("target table '{}' does not exist".format(
+                table_name))
         return type(
             table_name,
             (declarative_base(bind=self.engine),),
-            {"__tablename__": table_name, "__table_args__": {"autoload": True}})
+            {"__tablename__": table_name,
+             "__table_args__": {"autoload": True}})
 
     def _assign_limit(self, q, limit=1000):
         q = q.rstrip().rstrip(";")
 
-        if self._connection_data["dbtype"] == "mssql":
+        if self.credentials["dbtype"] == "mssql":
             new = "SELECT TOP {limit} * FROM ({q}) q"
         else:
             new = "SELECT * FROM ({q}) q LIMIT {limit}"
@@ -248,9 +231,11 @@ class DB(object):
         q: str
             An SQL query or statement string to execute
         data: list, dict
-            Optional argument for handlebars-queries. Data will be passed to the template and rendered using handlebars.
+            Optional argument for handlebars-queries. Data will be passed to
+            the template and rendered using handlebars.
         union: bool
-            Whether or not "UNION ALL" handlebars templates. This will return any handlebars queries as a single
+            Whether or not "UNION ALL" handlebars templates. This will return
+            any handlebars queries as a single
             DataFrame.
         limit: int
             Number of records to return (if not specified in query)
@@ -291,7 +276,9 @@ class DB(object):
                     try:
                         dataframes.append(pd.read_sql(qi, self.con))
                     except ResourceClosedError:
-                        dataframes.append(pd.DataFrame(data=[[qi, 1]], columns=["SQL", "Result"]))
+                        dataframes.append(
+                            pd.DataFrame(data=[[qi, 1]],
+                                         columns=["SQL", "Result"]))
             df = pd.concat(dataframes).reset_index(drop=True)
 
         else:
@@ -320,8 +307,8 @@ class DB(object):
         table_name: str
             The name of the table to insert data into
         commit_each: bool
-            If True, each inserted row is added and committed individually, maintaining order (Default).
-            If False, all rows are added at once.
+            If True, each inserted row is added and committed individually,
+            maintaining order (Default). If False, all rows are added at once.
 
         Example
         -------
@@ -369,7 +356,8 @@ class DB(object):
         self.close()
 
     def __str__(self):
-        return "DB[{dbtype}][{host}]:{port} > {user}@{dbname}".format(**self._config["connection_data"])
+        return "DB[{dbtype}][{host}]:{port} > {user}@{dbname}".format(
+            **self.credentials)
 
     def __repr__(self):
         return self.__str__()
@@ -473,7 +461,7 @@ class SQLiteDB(DB):
 
 class PostgresDB(DB):
     def __init__(self, username, password, hostname, dbname, dbtype="postgres",
-                 port=5432, schemas=None, profile="default",
+                 port=5432, schemas=None, profile="default", echo=False,
                  exclude_system_tables=True, limit=1000, keys_per_column=None,
                  driver="psycopg2"):
         super(PostgresDB, self).__init__(

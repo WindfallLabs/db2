@@ -8,6 +8,7 @@ import unittest
 from collections import namedtuple
 from sqlite3 import OperationalError
 
+import pandas as pd
 from sqlalchemy import Column, Integer, String
 from sqlalchemy.ext.declarative import declarative_base
 
@@ -25,8 +26,8 @@ class TestQueryFunctions(unittest.TestCase):
     def test_mssql_limit(self):
         d = DB(dbname=":memory:", dbtype="sqlite")
         # Spoof the dbtype to mssql
-        d._config["connection_data"]["dbtype"] = "mssql"
-        self.assertEqual(d._config["connection_data"]["dbtype"], "mssql")
+        d.credentials["dbtype"] = "mssql"
+        self.assertEqual(d.dbtype, "mssql")
         self.assertEqual(
             d._assign_limit("SELECT * FROM Artists", 10),
             'SELECT TOP 10 * FROM (SELECT * FROM Artists) q')
@@ -37,8 +38,6 @@ class TestDatabaseTables(unittest.TestCase):
         self.d = DB(dbname=":memory:", dbtype="sqlite")
 
     def tearDown(self):
-        self.d.con.close()
-        self.d.engine.dispose()
         del self.d
 
     def test_table_names_one(self):
@@ -54,6 +53,43 @@ class TestDatabaseTables(unittest.TestCase):
         self.d.engine.execute("CREATE TABLE test1 (id INT PRIMARY KEY)")
         self.d.engine.execute("CREATE TABLE test2 (id INT PRIMARY KEY)")
         self.assertEqual(self.d.table_names, ["test1", "test2"])
+
+
+class TestSQL(unittest.TestCase):
+    def setUp(self):
+        self.d = DB(dbname=":memory:", dbtype="sqlite")
+
+    def tearDown(self):
+        del self.d
+
+    def test_insert(self):
+        self.d.sql("CREATE TABLE test (id INT PRIMARY KEY, name TEXT)")
+        self.d.sql("INSERT INTO test VALUES (0, 'AC/DC')")
+        expected = pd.DataFrame(data=[[1, 'AC/DC']], columns=['id', 'name'])
+        t = self.d.sql("SELECT * FROM test")
+        self.assertEqual(list(t.columns), list(expected.columns))
+        self.assertEqual(t["name"].iat[0], expected["name"].iat[0])
+
+    def test_insert_many(self):
+        insert_data = [
+            {"id": 1, "name": "AC/DC"},
+            {"id": 2, "name": "Accept"},
+            {"id": 3, "name": "Aerosmith"}
+            ]
+        self.d.sql("CREATE TABLE test (id INT PRIMARY KEY, name TEXT)")
+        self.d.sql(
+            "INSERT INTO test VALUES ({{id}}, '{{name}}')",
+            insert_data,
+            union=False)
+        expected = pd.DataFrame(
+            data=[
+                [1, "AC/DC"],
+                [2, "Accept"],
+                [3, "Aerosmith"]],
+            columns=["id", "name"])
+        t = self.d.sql("SELECT * FROM test")
+        self.assertEqual(list(t.columns), list(expected.columns))
+        self.assertEqual(t["name"].iat[0], expected["name"].iat[0])
 
 
 class TestDatabaseURLs(unittest.TestCase):
