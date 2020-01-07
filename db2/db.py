@@ -4,6 +4,7 @@
 Module Docstring
 """
 
+import re
 import sys
 
 try:
@@ -22,6 +23,243 @@ from sqlalchemy.orm import sessionmaker
 from .utils import RowConverter
 
 pd.set_option('display.max_columns', 25)
+
+
+class Cursor(object):
+    def __init__(self, db):
+        """
+        Non-standard Cursor object.
+        Allows backwards compatibility for existing script that use db.py.
+
+        Parameters
+        ----------
+        db: db2.DB object
+            Database object to register with
+        """
+        self.con = db.con  # TODO: or should this be engine?
+        self.dbtype = db.dbtype
+        self._handlebars = pybars.Compiler()
+        self.return_limit = 3
+
+    @property
+    def native_placeholders(self):
+        """
+        The placeholders supported by the database type as regex strings
+
+        SQLite supports two kinds of placeholders:
+            question marks (qmark style) and named placeholders (named style).
+        <ADD OTHERS HERE>
+        """
+        if self.dbtype == "sqlite":
+            return ["\?", "\:\w+"]  # e.g. ["?", ":id"]
+        # TODO: Add additional database placehold support here
+        # elif self.dbtype == "postgres":
+        #    return ["\$\d+"]  # Is this right?
+        else:
+            raise NotImplementedError(
+                "'{}' is not currently supported".format(self.dbtype))
+
+    def _assign_limit(self, q, limit=1000):
+        q = q.rstrip().rstrip(";")
+
+        if self.credentials["dbtype"] == "mssql":
+            new = "SELECT TOP {limit} * FROM ({q}) q"
+        else:
+            new = "SELECT * FROM ({q}) q LIMIT {limit}"
+        return new.format(q=q, limit=limit)
+
+    def _apply_handlebars(self, q, data, union=True):
+        """
+        Create queries using Handlebars style templates
+
+        Example
+        -------
+        >>> d = DB(dbname=":memory:", dbtype="sqlite")
+        >>> d._apply_handlebars("SELECT {{n}} FROM Artist LIMIT 5;", data={"n": "Name"}, union=True)
+        u'SELECT Name FROM Artist LIMIT 5;'
+        >>> template = "SELECT '{{ name }}' AS table_name, COUNT(*) AS cnt FROM {{ name }} GROUP BY table_name"
+        >>> data = [{"name": "Album"}, {"name": "Artist"}, {"name": "Track"}]
+        >>> print(d._apply_handlebars(template, data, True))
+        SELECT 'Album' AS table_name, COUNT(*) AS cnt FROM Album GROUP BY table_name
+        UNION ALL SELECT 'Artist' AS table_name, COUNT(*) AS cnt FROM Artist GROUP BY table_name
+        UNION ALL SELECT 'Track' AS table_name, COUNT(*) AS cnt FROM Track GROUP BY table_name
+        >>> del d
+        """
+        template = self._handlebars.compile(q)
+        if isinstance(data, list):
+            query = [template(item) for item in data]
+            query = ["".join(item) for item in query]
+            if union is True:
+                query = "\nUNION ALL ".join(query)
+            else:
+                query = ";\n".join(query)
+        elif isinstance(data, dict):
+            query = "".join(template(data))
+        else:
+            return q
+        return query
+
+    def _query_has_native_placeholders(self, q):
+        """
+        Check query for qmark or named placeholders.
+
+        Parameters
+        ----------
+        q: str
+            SQL statement
+
+        Examples
+        --------
+        >>> cur = Cursor(SQLiteDB)
+
+        # qmark style
+        >>> cur._query_has_native_placeholders(
+        ...     "SELECT * FROM test_table WHERE id = ?")
+        True
+
+        # named style
+        >>> cur._query_has_native_placeholders(
+        ...     "SELECT * FROM test_table WHERE id = :id")
+        True
+
+        # but not for Handlebars style
+        >>> Cursor._query_has_native_placeholders(
+        ...     "SELECT * FROM test_table WHERE id = {{id}}")
+        False
+        """
+        if re.findall(re.compile("|".join(self.native_placeholders)), q):
+            return True
+        return False
+
+    def execute(self, sql, data=None, union=False, limit=None):
+        """
+        Executes an SQL statement. The SQL statement may be parameterized
+        (i. e. placeholders instead of SQL literals). db2 also adds support for
+        native placeholders and handlebars style placeholders.
+
+        Parameters
+        ----------
+        sql: unicode str
+            SQL statement to execute.
+        data: tuple or dict
+            Input data to submit to parameterized statement
+        union:
+
+        limit:
+
+        Examples
+        --------
+        >>> d = DB(dbname=":memory:", dbtype="sqlite")
+        # Execute an unparameterized statement:
+        >>> d.cur.execute(
+        ...     "CREATE TABLE Artist (ArtistId INT PRIMARY KEY, Name TEXT)")
+
+        # Execute statements parameterized in the qmark style:
+        >>> d.cur.execute("INSERT INTO Artist VALUES (?, ?)", (1, "AC/DC"))
+        >>> d.cur.execute("INSERT INTO Artist VALUES (?, ?)", (2, "Accept"))
+
+        # Execute statements parameterized in the named style:
+        >>> d.cur.execute("SELECT * FROM Artist where Name=:who",
+        ...               {"who": "AC/DC")
+
+        # Execute statements parameterized in the handlebars style:
+        # (similar to named style, but can be used where native placeholders
+        # are not normally allowed)
+        >>> d.cur.execute("SELECT {{col}} FROM Artist WHERE AritstId = 2",
+        ...               {"col": "Name"})
+
+        """
+        # Apply limit if supplied
+        if limit:
+            sql = self._assign_limit(sql, limit)
+
+        try:
+            # Check for native placeholders first
+            if self._query_has_native_placeholders(sql) \
+                    and isinstance(data, (tuple, dict)):
+                df = pd.read_sql(sql, self.con, params=data)
+            else:
+                sql = self._apply_handlebars(sql, data, union)
+                df = pd.read_sql(sql, self.con)
+
+        except ResourceClosedError:
+            # Just because it errors doens't mean stmts didn't execute
+            df = pd.DataFrame(data=[[sql, 1]],
+                              columns=["SQL", "Result"])
+
+        return df
+
+    def executemany(self, sql, data):
+        """
+        Executes a parameterized SQL statement over many data values.
+        This is already supported by SQLAlchemy's 'execute'.
+
+        Parameters
+        ----------
+        sql: unicode str
+            SQL statement to execute for each datum
+        data: list
+            Data to iterate sql statement over
+
+        Examples
+        --------
+        >>> d = DB(dbname=":memory:", dbtype="sqlite")
+        >>> d.cur.execute(
+        ...     "CREATE TABLE Artist (ArtistId INT PRIMARY KEY, Name TEXT)")
+
+        # Execute statement over data (in any placeholder style)
+        >>> d.cur.executemany("INSERT INTO Artist VALUES (?, ?)",
+        ...                   [(1, "AC/DC"),
+        ...                    (2, "Accept")])
+        """
+        #if self._query_has_native_placeholders(sql):
+        #    self.execute(sql, data)
+        #else:
+        dataframes = []
+        cnt = 0
+        for d in data:
+            # Iterate the stmt over the data applying handlebars style
+            dataframes.append(self.execute(sql, d))
+            cnt += 1
+        return_df = pd.concat(dataframes).reset_index(drop=True)
+        if len(return_df) <= self.return_limit:
+            return return_df
+        # Show parameterized rather than each stmt in result
+        return pd.DataFrame(
+            data=[[sql, cnt]],
+            columns=["SQL", "Result"])
+
+    def executescript(self, sql, data=None):
+        """
+        Executes multiple SQL statements at once.
+
+        Parameters
+        ----------
+        sql: str
+            Multiple SQL statements to execute.
+        data: dict
+            This only supports handlebars style parameterization
+        """
+        dataframes = []
+        for stmt in [i.strip() for i in sql.split(";") if i]:
+            dataframes.append(self.execute(stmt, data))
+
+        return pd.concat(dataframes).reset_index(drop=True)
+
+    def executeunified(self, sql, data, union=False, limit=None):
+        """
+        Automatically applies the appropriate method to execute an SQL
+        statement.
+        """
+        # Execute script
+        if len(re.findall(";", sql)) > 1:
+            return self.executescript(sql, data)
+        # Execute many (data is list)
+        elif isinstance(data, list):
+            return self.executemany(sql, data)
+        # Execute single statement
+        else:
+            return self.execute(sql, data, union, limit)
 
 
 class DB(object):
@@ -93,6 +331,7 @@ class DB(object):
 
         # Connect
         self.con = self.engine.connect()
+        self.cur = Cursor(self)
 
         # Create session (WIP)
         self.session = sessionmaker(bind=self.engine)()
@@ -180,115 +419,70 @@ class DB(object):
             {"__tablename__": table_name,
              "__table_args__": {"autoload": True}})
 
-    def _assign_limit(self, q, limit=1000):
-        q = q.rstrip().rstrip(";")
-
-        if self.credentials["dbtype"] == "mssql":
-            new = "SELECT TOP {limit} * FROM ({q}) q"
-        else:
-            new = "SELECT * FROM ({q}) q LIMIT {limit}"
-        return new.format(q=q, limit=limit)
-
-    def _apply_handlebars(self, q, data, union=True):
+    def sql(self, sql, data=None, union=False, limit=None, filename=None):
         """
-        Create queries using Handlebars style templates
-
-        Example
-        -------
-        >>> d = DB(dbname=":memory:", dbtype="sqlite")
-        >>> d._apply_handlebars("SELECT {{n}} FROM Artist LIMIT 5;", data={"n": "Name"}, union=True)
-        u'SELECT Name FROM Artist LIMIT 5;'
-        >>> template = "SELECT '{{ name }}' AS table_name, COUNT(*) AS cnt FROM {{ name }} GROUP BY table_name"
-        >>> data = [{"name": "Album"}, {"name": "Artist"}, {"name": "Track"}]
-        >>> print(d._apply_handlebars(template, data, True))
-        SELECT 'Album' AS table_name, COUNT(*) AS cnt FROM Album GROUP BY table_name
-        UNION ALL SELECT 'Artist' AS table_name, COUNT(*) AS cnt FROM Artist GROUP BY table_name
-        UNION ALL SELECT 'Track' AS table_name, COUNT(*) AS cnt FROM Track GROUP BY table_name
-        >>> del d
-        """
-        if (sys.version_info < (3, 0)):
-            q = unicode(q)
-        template = self._handlebars.compile(q)
-        if isinstance(data, list):
-            query = [template(item) for item in data]
-            query = ["".join(item) for item in query]
-            if union is True:
-                query = "\nUNION ALL ".join(query)
-            else:
-                query = ";\n".join(query)
-        elif isinstance(data, dict):
-            query = "".join(template(data))
-        else:
-            return q
-        return query
-
-    def sql(self, q, data=None, union=True, limit=None):
-        """
-        Execute an SQL query or statement
+        Execute SQL
+        Unifies 'DB.cur.execute', 'DB.cur.executemany', and
+        'DB.cur.executescript' into a single, flexible method
 
         Parameters
         ----------
-        q: str
+        sql: str
             An SQL query or statement string to execute
         data: list, dict
             Optional argument for handlebars-queries. Data will be passed to
-            the template and rendered using handlebars.
+            the template and rendered using handlebars. Any items in data not
+            specified in q are ignored.
         union: bool
-            Whether or not "UNION ALL" handlebars templates. This will return
-            any handlebars queries as a single
-            DataFrame.
+            Whether or not to join statements with "UNION ALL". Allowing for
+            many SELECT statements to return as one dataframe.
         limit: int
             Number of records to return (if not specified in query)
+        filename: str (path)
+            Optionally execute SQL from a file
 
         Returns a pandas DataFrame
 
         Example
         -------
         >>> d = DB(dbname=":memory:", dbtype="sqlite")
-        >>> d.engine.execute("CREATE TABLE Artist (ArtistId INT PRIMARY KEY, Name TEXT);") # doctest:+ELLIPSIS
-        <sqlalchemy.engine.result.ResultProxy object at 0x...>
-        >>> d.sql(
-        ...     "INSERT INTO Artist VALUES ({{artistid}}, '{{name}}');",
-        ...     data=[{"artistid": 1, "name": "AC/DC"}, {"artistid": 2, "name": "Accept"}],
-        ...     union=False)
-                                                   SQL  Result
-            0   INSERT INTO Artist VALUES (1, 'AC/DC')       1
-            1  INSERT INTO Artist VALUES (2, 'Accept')       1
 
-        >>> d.sql("SELECT ArtistId FROM Artist WHERE Name = '{{n}}'", data=[{"n": "AC/DC"}, {"n": "Accept"}], union=False)
+        # Execute a statement
+        >>> d.sql("CREATE TABLE Artist (ArtistId INT PRIMARY KEY, Name TEXT);") # doctest:+ELLIPSIS
+                                                         SQL  Result
+        0  CREATE TABLE Artist (ArtistId INT PRIMARY KEY,...
+
+        # Execute many statements by iterating over data
+        # via handlebars
+        >>> d.sql("INSERT INTO Artist VALUES ({{artistid}}, '{{name}}');",
+        ...       data=[{"artistid": 1, "name": "AC/DC"},
+        ...             {"artistid": 2, "name": "Accept"}],
+        ...       union=False)
+                                               SQL  Result
+        0   INSERT INTO Artist VALUES (1, 'AC/DC')       1
+        1  INSERT INTO Artist VALUES (2, 'Accept')       1
+
+        # via qmarks
+        >>> d.sql("INSERT INTO Artist VALUES (?, ?);",
+        ...       data=[(3, "Aerosmith"),
+        ...             (4, "Alanis Moressette")])
+
+        >>> d.sql("SELECT ArtistId FROM Artist WHERE Name = '{{n}}'",
+        ...       data=[{"n": "AC/DC"},
+        ...             {"n": "Accept"}],
+        ...       union=False)
                                                          SQL  Result
         0   SELECT ArtistId FROM Artist WHERE Name = 'AC/DC'       1
         1  SELECT ArtistId FROM Artist WHERE Name = 'Accept'       2
         """
-        q = unicode(q)
+        if (sys.version_info < (3, 0)):
+            sql = unicode(sql)
 
-        if data:
-            q = self._apply_handlebars(q, data, union)
-        if limit:
-            q = self._assign_limit(q, limit)
+        if filename:
+            with open(filename, "r") as f:
+                sql = f.read()
 
-        # Execute multiple statements individually
-        if isinstance(data, list) and union is False:
-            dataframes = []
-            for qi in q.split(";"):
-                qi = qi.strip()
-                if qi:
-                    try:
-                        dataframes.append(pd.read_sql(qi, self.con))
-                    except ResourceClosedError:
-                        dataframes.append(
-                            pd.DataFrame(data=[[qi, 1]],
-                                         columns=["SQL", "Result"]))
-            df = pd.concat(dataframes).reset_index(drop=True)
-
-        else:
-            try:
-                # Return query results
-                df = pd.read_sql(q, self.con)
-
-            except ResourceClosedError:
-                # Return a DataFrame indicating successful statement
-                df = pd.DataFrame(data=[[q, 1]], columns=["SQL", "Result"])
+        df = self.cur.executeunified(sql, data, union, limit)
         return df
 
     def create_mapping(self, mapping):

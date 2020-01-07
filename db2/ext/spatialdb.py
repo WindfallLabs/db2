@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # !/usr/bin/env python2
 """
 Module Docstring
@@ -15,6 +14,7 @@ export C_INCLUDE_PATH=/usr/include/gdal
 pip install GDAL==$(gdal-config --version) --global-option=build_ext --global-option="-I/usr/include/gdal"
 """
 
+import os
 import re
 import struct
 import sys
@@ -36,6 +36,19 @@ if sys.platform.startswith("linux"):
     MOD_SPATIALITE = "/usr/local/lib/mod_spatialite.so"
 else:
     MOD_SPATIALITE = "mod_spatialite"
+
+
+GEOM_TYPES = {
+    1: "POINT",
+    2: "LINESTRING",
+    3: "POLYGON",
+    # ...
+    6: "MULTIPOLYGON"
+    }
+
+
+class SpatiaLiteError(Exception):
+    pass
 
 
 def get_sr_from_web(srid, auth, sr_format):
@@ -307,16 +320,66 @@ class SpatiaLiteDB(SQLiteDB):
             "SELECT * FROM spatial_ref_sys WHERE srid=?", (srid,)
             ).fetchall()) == 1
 
+    def import_shp(self, filename, table_name, charset="UTF-8", srid=-1,
+                   geom_column="geometry", pk_column="PK",
+                   geometry_type="AUTO", coerce2D=0, compressed=0,
+                   spatial_index=0, text_dates=0):
+        """
+        Import a shapefile using the SpatiaLite function ImportSHP.
+        Faster than 'load_geodataframe' but much more sensitive to data errors.
 
-    def load_geodataframe(self, gdf, table_name, srid=-1, primary_key=""):
+        Parameters
+        ----------
+
+        """
+        # Validate
+        filename = os.path.splitext(filename)[0].replace("\\", "/")
+        if not os.path.exists(filename + ".shp"):
+            raise AttributeError("cannot find path specified")
+        if not self.has_srid(srid):
+            self.get_spatial_ref_sys(srid)
+        df = self.sql(
+            "SELECT ImportSHP(?,?,?,?,?,?,?,?,?,?,?);",
+            (filename, table_name, charset, srid, geom_column, pk_column,
+             geometry_type, coerce2D, compressed, spatial_index, text_dates))
+        if table_name not in self.table_names:
+            raise SpatiaLiteError("import failed")
+        return df
+
+    def load_geodataframe(self, gdf, table_name, srid, primary_key=""):
         """
         Create a spatial table from a geopandas.GeoDataFrame
         """
+        # TODO: rename to import_geodataframe
         if not self.has_srid(srid):
             self.get_spatial_ref_sys(srid)
         gdf_sql = GeoDataFrameToSQLHandler(
             gdf, table_name, srid, primary_key, cast_to_multi=True)
         return gdf_sql.execute(self)
+
+    def export_shp(self, table_name, filename, geom_column="geometry",
+                   charset="UTF-8", geometry_type="AUTO"):
+        """
+        Export a shapefile using the SpatiaLite function ExportSHP.
+        Note that parameters have been altered to improve functionality and
+        make consistant with ImportSHP.
+        """
+        # Validate
+        if table_name not in self.table_names:
+            raise AttributeError("table '{}' not found".format(table_name))
+        filename = os.path.splitext(filename)[0].replace("\\", "/")
+        geom_data = self.get_geometry_data(table_name)
+        if geometry_type == "AUTO":
+            geometry_type = GEOM_TYPES[geom_data["geometry_type"]]
+        # Execute
+        df = self.sql(
+            "SELECT ImportSHP(?,?,?,?);",
+            # ExportSHP parameter order
+            (table_name, geom_column, filename, charset)) #, geometry_type))
+        if not os.path.exists(filename + ".shp"):
+            raise SpatiaLiteError("export failed")
+        return df  # TODO: WIP not working
+
 
     def get_spatial_ref_sys(self, srid, auth="esri"):
         """
@@ -372,6 +435,10 @@ class SpatiaLiteDB(SQLiteDB):
     def geometries(self):
         """Return the contents of table `geometry_columns` and srs info."""
         return self.sql("SELECT * FROM geometry_columns g LEFT JOIN spatial_ref_sys s ON g.srid=s.srid")
+
+    def get_geometry_data(self, table_name):
+        return self.geometries[self.geometries["f_table_name"] == table_name
+                               ].iloc[0].to_dict()
 
     def __str__(self):
         return "SpatialDB[SQLite/SpatiaLite] > {dbname}".format(
