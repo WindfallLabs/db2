@@ -1,3 +1,8 @@
+# !/usr/bin/env python2
+"""
+Test ext.spatialdb module
+"""
+
 import unittest
 
 from db2.ext.spatialdb import SpatiaLiteDB, get_sr_from_web
@@ -14,7 +19,6 @@ class UtilTests(unittest.TestCase):
         lite_sr = get_sr_from_web(102700, "esri", "spatialite")
         self.assertEqual(post_sr, test_sr[0].strip())
         self.assertEqual(lite_sr, test_sr[1].strip())
-
 
 class MainTests(unittest.TestCase):
     def setUp(self):

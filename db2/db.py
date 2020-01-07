@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # !/usr/bin/env python2
 """
-Module Docstring
+db module
 """
 
 import re
@@ -20,8 +20,6 @@ from sqlalchemy.exc import ResourceClosedError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-from .utils import RowConverter
-
 pd.set_option('display.max_columns', 25)
 
 
@@ -36,8 +34,8 @@ class Cursor(object):
         db: db2.DB object
             Database object to register with
         """
+        self.db = db
         self.con = db.con  # TODO: or should this be engine?
-        self.dbtype = db.dbtype
         self._handlebars = pybars.Compiler()
         self.return_limit = 3
 
@@ -50,7 +48,7 @@ class Cursor(object):
             question marks (qmark style) and named placeholders (named style).
         <ADD OTHERS HERE>
         """
-        if self.dbtype == "sqlite":
+        if self.db.dbtype == "sqlite":
             return ["\?", "\:\w+"]  # e.g. ["?", ":id"]
         # TODO: Add additional database placehold support here
         # elif self.dbtype == "postgres":
@@ -62,7 +60,7 @@ class Cursor(object):
     def _assign_limit(self, q, limit=1000):
         q = q.rstrip().rstrip(";")
 
-        if self.credentials["dbtype"] == "mssql":
+        if self.db.dbtype == "mssql":
             new = "SELECT TOP {limit} * FROM ({q}) q"
         else:
             new = "SELECT * FROM ({q}) q LIMIT {limit}"
@@ -85,19 +83,23 @@ class Cursor(object):
         UNION ALL SELECT 'Track' AS table_name, COUNT(*) AS cnt FROM Track GROUP BY table_name
         >>> del d
         """
+
         template = self._handlebars.compile(q)
+        has_semicolon = True if q.endswith(";") else False
         if isinstance(data, list):
             query = [template(item) for item in data]
             query = ["".join(item) for item in query]
             if union is True:
                 query = "\nUNION ALL ".join(query)
             else:
-                query = ";\n".join(query)
+                has_semicolon = True
+                query = ";\n".join([i.strip(";") for i in query])
         elif isinstance(data, dict):
             query = "".join(template(data))
         else:
             return q
-        return query
+        return query + (";" if not query.endswith(";")
+                        and has_semicolon is True else "")
 
     def _query_has_native_placeholders(self, q):
         """
@@ -169,6 +171,9 @@ class Cursor(object):
         ...               {"col": "Name"})
 
         """
+        if (sys.version_info < (3, 0)):
+            sql = unicode(sql)
+
         # Apply limit if supplied
         if limit:
             sql = self._assign_limit(sql, limit)
@@ -186,7 +191,6 @@ class Cursor(object):
             # Just because it errors doens't mean stmts didn't execute
             df = pd.DataFrame(data=[[sql, 1]],
                               columns=["SQL", "Result"])
-
         return df
 
     def executemany(self, sql, data):
@@ -212,9 +216,6 @@ class Cursor(object):
         ...                   [(1, "AC/DC"),
         ...                    (2, "Accept")])
         """
-        #if self._query_has_native_placeholders(sql):
-        #    self.execute(sql, data)
-        #else:
         dataframes = []
         cnt = 0
         for d in data:
@@ -475,9 +476,6 @@ class DB(object):
         0   SELECT ArtistId FROM Artist WHERE Name = 'AC/DC'       1
         1  SELECT ArtistId FROM Artist WHERE Name = 'Accept'       2
         """
-        if (sys.version_info < (3, 0)):
-            sql = unicode(sql)
-
         if filename:
             with open(filename, "r") as f:
                 sql = f.read()
@@ -488,57 +486,6 @@ class DB(object):
     def create_mapping(self, mapping):
         """Creates a table from a mapping object."""
         mapping.__table__.create(self.engine)
-        return
-
-    def insert(self, rows, table_name=None, commit_each=True):
-        """
-        Insert rows of data into a database table via a session.
-
-        Parameters
-        ----------
-        rows: list
-            Insert a list of row data into the database session
-        table_name: str
-            The name of the table to insert data into
-        commit_each: bool
-            If True, each inserted row is added and committed individually,
-            maintaining order (Default). If False, all rows are added at once.
-
-        Example
-        -------
-        >>> d = DB(dbname=":memory:", dbtype="sqlite")
-        >>> d.engine.execute("CREATE TABLE Artist (ArtistId INT PRIMARY KEY, Name TEXT);") # doctest:+ELLIPSIS
-        <sqlalchemy.engine.result.ResultProxy object at 0x...>
-        >>> d.insert([[1, "AC/DC"]], "Artist")
-        >>> d.insert([{"ArtistId": 2, "Name": "Accept"}, {"ArtistId": 3, "Name": "Aerosmith"}], "Artist")
-        >>> d.insert([[("ArtistId", 4), ("Name", "Alanis Moressette")]], "Artist")
-        >>> d.engine.execute("SELECT * FROM Artist").fetchall()
-        [(1, u'AC/DC'), (2, u'Accept'), (3, u'Aerosmith'), (4, u'Alanis Moressette')]
-        >>> del d
-        """
-        if type(rows) is not list:
-            raise AttributeError("parameter 'rows' must be list")
-
-        bulk_inserts = []
-        for row in rows:
-            # Convert non-mapping instance collections to mapping instance
-            if not hasattr(row, "__tablename__"):
-                if table_name is None:
-                    raise AttributeError("table name cannot be None")
-                row = RowConverter(self, table_name, row).convert()
-
-            # Insert individually
-            if commit_each:
-                self.session.add(row)
-                self.session.commit()
-
-            # Bulk insert
-            else:
-                bulk_inserts.append(row)
-
-        if not commit_each:
-            self.session.add_all(bulk_inserts)
-            self.session.commit()
         return
 
     def close(self):

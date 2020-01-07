@@ -1,4 +1,3 @@
-from db import RowConverter
 from db import DB
 from db import SQLiteDB
 

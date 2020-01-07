@@ -1,7 +1,6 @@
-# -*- coding: utf-8 -*-
 # !/usr/bin/env python2
 """
-Module Docstring
+Test db module
 """
 
 import unittest
@@ -12,25 +11,115 @@ import pandas as pd
 from sqlalchemy import Column, Integer, String
 from sqlalchemy.ext.declarative import declarative_base
 
-from db2 import DB
+from db2 import DB, SQLiteDB
 
 
-class TestQueryFunctions(unittest.TestCase):
+class CursorTests(unittest.TestCase):
+    def setUp(self):
+        self.d = SQLiteDB(":memory:")
+        self.d.engine.execute("DROP TABLE IF EXISTS Artist")
+        self.d.cur.execute(
+            "CREATE TABLE Artist (ArtistId INT PRIMARY KEY, Name TEXT);")
+
+    def tearDown(self):
+        del self.d
+
+    def test_trivial(self):
+        self.assertTrue(hasattr(self.d, "cur"))
 
     def test_limit(self):
-        d = DB(dbname=":memory:", dbtype="sqlite")
         self.assertEqual(
-            d._assign_limit("SELECT * FROM Artists", 5),
+            self.d.cur._assign_limit("SELECT * FROM Artists", 5),
             'SELECT * FROM (SELECT * FROM Artists) q LIMIT 5')
 
     def test_mssql_limit(self):
-        d = DB(dbname=":memory:", dbtype="sqlite")
         # Spoof the dbtype to mssql
-        d.credentials["dbtype"] = "mssql"
-        self.assertEqual(d.dbtype, "mssql")
+        self.d.credentials["dbtype"] = "mssql"
+        self.assertEqual(self.d.dbtype, "mssql")
         self.assertEqual(
-            d._assign_limit("SELECT * FROM Artists", 10),
+            self.d.cur._assign_limit("SELECT * FROM Artists", 10),
             'SELECT TOP 10 * FROM (SELECT * FROM Artists) q')
+
+    def test_handlebars_without_semicolon(self):
+        # Original query does not include semicolon
+        # _apply_handlebars does not add one to single queries
+        template = u"INSERT INTO Artist VALUES ({{id}}, '{{name}}')"
+        # Apply once
+        once = self.d.cur._apply_handlebars(
+            template,
+            [{"id": 1, "name": "AC/DC"}])
+        expected1 = u"INSERT INTO Artist VALUES (1, 'AC/DC')"
+        self.assertEqual(once, expected1)
+
+        # Apply for many
+        twice = self.d.cur._apply_handlebars(
+            template,
+            [{"id": 1, "name": "AC/DC"}, {"id": 2, "name": "Accept"}],
+            union=False)
+        expected2 = (u"INSERT INTO Artist VALUES (1, 'AC/DC');\n"
+                     u"INSERT INTO Artist VALUES (2, 'Accept');")
+        self.assertEqual(twice, expected2)
+
+    def test_handlebars_with_semicolon(self):
+        # Includes semicolon
+        semicolon_template = u"INSERT INTO Artist VALUES ({{id}}, '{{name}}');"
+        # Apply once
+        once = self.d.cur._apply_handlebars(
+            semicolon_template,
+            [{"id": 1, "name": "AC/DC"}])
+        expected1 = u"INSERT INTO Artist VALUES (1, 'AC/DC');"
+        self.assertEqual(once, expected1)
+
+        # Apply for many
+        twice = self.d.cur._apply_handlebars(
+            semicolon_template,
+            [{"id": 1, "name": "AC/DC"}, {"id": 2, "name": "Accept"}],
+            union=False)
+        expected2 = (u"INSERT INTO Artist VALUES (1, 'AC/DC');\n"
+                     u"INSERT INTO Artist VALUES (2, 'Accept');")
+        self.assertEqual(twice, expected2)
+
+    def test_execute(self):
+        self.d.cur.execute(
+            "INSERT INTO Artist VALUES (1, 'AC/DC');")
+        self.assertTrue("Artist" in self.d.table_names)
+        df = self.d.cur.execute("SELECT * FROM Artist")
+        self.assertEqual(df["Name"].iat[0], "AC/DC")
+
+    def test_executemany_named(self):
+        # SQLite named
+        self.d.cur.executemany(
+            "INSERT INTO Artist VALUES (:id, :name);",
+            ({"id": 1, "name": "AC/DC"}, {"id": 2, "name": "Accept"}))
+        df = self.d.cur.execute(
+            "SELECT * FROM Artist WHERE ArtistId IN (1, 2)")
+        self.assertTrue(df["Name"].tolist(), ["AC/DC", "Accept"])
+
+    def test_executemany_qmark(self):
+        # SQLite named
+        self.d.cur.executemany(
+            "INSERT INTO Artist VALUES (?, ?);",
+            [(1, "AC/DC"), (2, "Accept")])
+        df = self.d.cur.execute(
+            "SELECT * FROM Artist WHERE ArtistId IN (1, 2)")
+        self.assertTrue(df["Name"].tolist(), ["AC/DC", "Accept"])
+
+    def test_executemany_handlebars(self):
+        # SQLite named
+        self.d.cur.executemany(
+            "INSERT INTO Artist VALUES ({{id}}, '{{name}}');",
+            [{"id": 1, "name": "AC/DC"}, {"id": 2, "name": "Accept"}])
+        df = self.d.cur.execute(
+            "SELECT * FROM Artist WHERE ArtistId IN (1, 2)")
+        self.assertTrue(df["Name"].tolist(), ["AC/DC", "Accept"])
+
+    def test_executescript(self):
+        s = ("INSERT INTO Artist VALUES (1, 'AC/DC');"
+             "INSERT INTO Artist VALUES (2, 'Accept');"
+             "INSERT INTO Artist VALUES (3, 'Aeromith');")
+        self.d.cur.executescript(s)
+        df = self.d.cur.execute("SELECT * FROM Artist")
+        self.assertEqual(len(df), 3)
 
 
 class TestDatabaseTables(unittest.TestCase):
@@ -117,62 +206,8 @@ class TestDatabaseURLs(unittest.TestCase):
                 "dbname": "chinook", "user": "dbread", "pwd": "my$tr0ngPWD",
                 "host": "localhost", "dbtype": "mssql",
                 "driver": '{ODBC DRIVER 13 for SQL Server}'}),
-            'mssql+pyodbc:///?odbc_connect=DRIVER%3D%7BODBC+DRIVER+13+for+SQL+Server%7D%3BSERVER%3Dlocalhost%3BDATABASE%3Dchinook%3BUID%3Ddbread%3BPWD%3Dmy%24tr0ngPWD'
+            # Big string
+            ("mssql+pyodbc:///?odbc_connect=DRIVER%3D%7BODBC+DRIVER+13+for+SQL"
+             "+Server%7D%3BSERVER%3Dlocalhost%3BDATABASE%3Dchinook%3B"
+             "UID%3Ddbread%3BPWD%3Dmy%24tr0ngPWD")
             )
-
-
-class TestORM_Inserts(unittest.TestCase):
-    def setUp(self):
-        self.d = DB(dbname=":memory:", dbtype="sqlite")
-        self.s = "SELECT * FROM Artist"
-
-    def tearDown(self):
-        self.d.con.close()
-        self.d.engine.dispose()
-        del self.d
-
-    def create_table(self):
-        self.d.engine.execute(
-            "CREATE TABLE Artist (ArtistId INT PRIMARY KEY, Name TEXT)")
-
-    def test_insert_dict(self):
-        self.create_table()
-        self.d.insert([{"ArtistId": 2, "Name": "Accept"}], "Artist")
-        self.assertEqual(
-            self.d.engine.execute(self.s).fetchall(),
-            [(2, "Accept")])
-
-    def test_insert_tuples(self):
-        self.create_table()
-        self.d.insert([[("ArtistId", 3), ("Name", "Aerosmith")]], "Artist")
-        self.assertEqual(
-            self.d.engine.execute(self.s).fetchall(),
-            [(3, "Aerosmith")])
-
-    def test_insert_namedtuple(self):
-        self.create_table()
-        ArtistNT = namedtuple("Artist", ["ArtistId", "Name"])
-        self.d.insert([ArtistNT(4, "Alanis Moressette")], "Artist")
-        self.assertEqual(
-            self.d.engine.execute(self.s).fetchall(),
-            [(4, "Alanis Moressette")])
-
-    def test_insert_list(self):
-        self.create_table()
-        self.d.insert([[5, "Alice In Chains"]], "Artist")
-        self.assertEqual(
-            self.d.engine.execute(self.s).fetchall(),
-            [(5, "Alice In Chains")])
-
-
-'''
-session.add_all([
-    Album(AlbumId=1, Title="For Those About To Rock We Salute You", ArtistId=1),
-    Album(AlbumId=2, Title="Balls to the Wall", ArtistId=2),
-    Album(AlbumId=3, Title="Restless and Wild", ArtistId=2),
-    Album(AlbumId=4, Title="Let There Be Rock", ArtistId=1),
-    Album(AlbumId=5, Title="Big Ones", ArtistId=3)
-])
-
-session.commit()
-'''
