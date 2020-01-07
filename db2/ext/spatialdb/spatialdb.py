@@ -29,7 +29,7 @@ import shapely
 from geopandas.io.file import infer_schema
 from sqlalchemy import func, select
 
-from .. import SQLiteDB
+from db2 import SQLiteDB
 
 
 if sys.platform.startswith("linux"):

@@ -13,7 +13,7 @@ class UtilTests(unittest.TestCase):
         pass
 
     def test_get_sr_from_web(self):
-        with open("./tests/ext/data/mtstplane_102700.txt", "r") as f:
+        with open("./tests/ext/spatialdb/data/mtstplane_102700.txt", "r") as f:
             test_sr = f.readlines()
         post_sr = get_sr_from_web(102700, "esri", "postgis")
         lite_sr = get_sr_from_web(102700, "esri", "spatialite")
@@ -22,7 +22,7 @@ class UtilTests(unittest.TestCase):
 
 class MainTests(unittest.TestCase):
     def setUp(self):
-        self.test_data = "/media/garin/MAPS_MEDIA1/Maps/GIS/GeneralData/ContUSWildCentroids.shp"
+        self.test_data = "./tests/ext/spatialdb/data/ContUSWildCentroids.shp"
 
     def test_load_geodataframe(self):
         import geopandas as gpd
