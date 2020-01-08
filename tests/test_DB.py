@@ -205,9 +205,6 @@ class TestDatabaseURLs(unittest.TestCase):
             DB._create_url(**{
                 "dbname": "chinook", "user": "dbread", "pwd": "my$tr0ngPWD",
                 "host": "localhost", "dbtype": "mssql",
-                "driver": '{ODBC DRIVER 13 for SQL Server}'}),
+                "driver": 'pymssql'}),
             # Big string
-            ("mssql+pyodbc:///?odbc_connect=DRIVER%3D%7BODBC+DRIVER+13+for+SQL"
-             "+Server%7D%3BSERVER%3Dlocalhost%3BDATABASE%3Dchinook%3B"
-             "UID%3Ddbread%3BPWD%3Dmy%24tr0ngPWD")
-            )
+            "mssql+pymssql://dbread:my$tr0ngPWD@localhost/?charset=utf8")

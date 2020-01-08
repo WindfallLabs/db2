@@ -34,13 +34,13 @@ class Cursor(object):
         db: db2.DB object
             Database object to register with
         """
-        self.db = db
+        self._db = db
         self.con = db.con  # TODO: or should this be engine?
         self._handlebars = pybars.Compiler()
         self.return_limit = 3
 
     @property
-    def native_placeholders(self):
+    def native_placeholders(self):  # TODO: move to indiv DB classes
         """
         The placeholders supported by the database type as regex strings
 
@@ -48,19 +48,18 @@ class Cursor(object):
             question marks (qmark style) and named placeholders (named style).
         <ADD OTHERS HERE>
         """
-        if self.db.dbtype == "sqlite":
+        if self._db.dbtype == "sqlite":
             return ["\?", "\:\w+"]  # e.g. ["?", ":id"]
         # TODO: Add additional database placehold support here
         # elif self.dbtype == "postgres":
         #    return ["\$\d+"]  # Is this right?
         else:
-            raise NotImplementedError(
-                "'{}' is not currently supported".format(self.dbtype))
+            return ["\?"]
 
     def _assign_limit(self, q, limit=1000):
         q = q.rstrip().rstrip(";")
 
-        if self.db.dbtype == "mssql":
+        if self._db.dbtype == "mssql":
             new = "SELECT TOP {limit} * FROM ({q}) q"
         else:
             new = "SELECT * FROM ({q}) q LIMIT {limit}"
@@ -101,7 +100,7 @@ class Cursor(object):
         return query + (";" if not query.endswith(";")
                         and has_semicolon is True else "")
 
-    def _query_has_native_placeholders(self, q):
+    def _query_has_native_placeholders(self, sql):
         """
         Check query for qmark or named placeholders.
 
@@ -129,7 +128,7 @@ class Cursor(object):
         ...     "SELECT * FROM test_table WHERE id = {{id}}")
         False
         """
-        if re.findall(re.compile("|".join(self.native_placeholders)), q):
+        if re.findall(re.compile("|".join(self.native_placeholders)), sql):
             return True
         return False
 
@@ -305,6 +304,8 @@ class DB(object):
             List of extensions to load on connection
         """
         self._encoding = encoding
+        # Credentials
+        # TODO: copy over db.py's utils.py and implement profiles
         self.credentials = {
                 "user": username,
                 "pwd": password,
@@ -365,10 +366,8 @@ class DB(object):
             return "sqlite:///{}".format(kwargs["dbname"])
         # MSSQL
         elif kwargs["dbtype"] == "mssql":
-            mstemp = ('DRIVER={driver};SERVER={host};DATABASE={dbname};'
-                      'UID={user};PWD={pwd}')
-            params = quote_plus(mstemp.format(**kwargs))
-            return "mssql+pyodbc:///?odbc_connect={}".format(params)
+            return "mssql+{driver}://{user}:{pwd}@{host}/?charset=utf8".format(
+                **kwargs)
         # Others
         kwargs = {k: v if v else "" for k, v in kwargs.items()}
         kwargs["port"] = ":{}".format(kwargs["port"]) if kwargs["port"] else ""
@@ -482,6 +481,9 @@ class DB(object):
 
         df = self.cur.executeunified(sql, data, union, limit)
         return df
+
+    def load_dataframe(self, df, enforcer=None):
+        pass
 
     def create_mapping(self, mapping):
         """Creates a table from a mapping object."""
@@ -620,7 +622,7 @@ class MSSQLDB(DB):
     Utility for exploring and querying a Microsoft SQL database.
     """
     def __init__(self, username, password, hostname, dbname, port=1433,
-                 driver='{ODBC DRIVER 13 for SQL Server}', echo=False):
+                 driver='pymssql', echo=False):
         super(MSSQLDB, self).__init__(
             username=username,
             password=password,
@@ -629,3 +631,11 @@ class MSSQLDB(DB):
             dbtype="mssql",
             driver=driver,
             echo=echo)
+
+    @property
+    def table_names(self):
+        return self.sql(
+            "SELECT TABLE_NAME "
+            "FROM {{dbname}}.INFORMATION_SCHEMA.TABLES "
+            "WHERE TABLE_TYPE = 'BASE TABLE'",
+            {"dbname": self.dbname})["TABLE_NAME"].tolist()
