@@ -6,6 +6,8 @@ Test ext.spatialdb module
 import os
 import unittest
 
+import geopandas as gpd
+
 from db2.ext.spatialdb import SpatiaLiteDB, get_sr_from_web
 
 
@@ -32,21 +34,32 @@ class UtilTests(unittest.TestCase):
         # If run again, do nothing
         self.assertEqual(d.get_spatial_ref_sys(102700, "esri"), 0)
 
+
 class MainTests(unittest.TestCase):
     def setUp(self):
         self.test_data = "./tests/ext/spatialdb/data/ContUSWildCentroids.shp"
 
+    def test_sql_empty_df(self):
+        d = SpatiaLiteDB(":memory:")
+        df = d.sql("SELECT * FROM ElementaryGeometries")
+        cols = [
+            'db_prefix',
+            'f_table_name',
+            'f_geometry_column',
+            'origin_rowid',
+            'item_no',
+            'geometry']
+        self.assertTrue(df.empty and df.columns.tolist() == cols)
+
     def test_load_geodataframe(self):
-        import geopandas as gpd
         d = SpatiaLiteDB(":memory:")
         gdf = gpd.read_file(self.test_data)
         d.load_geodataframe(gdf, "wild", 4326)
         self.assertTrue("wild" in d.table_names)
+        self.assertTrue("wild" in d.geometries["f_table_name"].tolist())
         self.assertEqual(
             d.sql(("SELECT DISTINCT IsValid(geometry) "
-                      "FROM wild")
-                     ).iloc[0]["IsValid(geometry)"],
-            1)
+                   "FROM wild")).iloc[0]["IsValid(geometry)"], 1)
 
     def test_import_shp(self):
         os.environ["SPATIALITE_SECURITY"] = "relaxed"  # TODO: rm
@@ -55,9 +68,9 @@ class MainTests(unittest.TestCase):
         self.assertTrue("wild" in d.table_names)
 
     def test_sql(self):
-        import geopandas as gpd
         d = SpatiaLiteDB(":memory:")
         gdf = gpd.read_file(self.test_data)
         d.load_geodataframe(gdf, "wild", srid=4326)
         df = d.sql("SELECT * FROM wild LIMIT 5")
         self.assertEqual(len(df), 5)
+        self.assertTrue("geometry" in df.columns)

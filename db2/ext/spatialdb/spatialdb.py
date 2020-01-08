@@ -25,11 +25,12 @@ from sqlite3 import IntegrityError
 import fiona
 import geopandas as gpd
 import pandas as pd
-import shapely
+import shapely.wkt
 from geopandas.io.file import infer_schema
 from sqlalchemy import func, select
 
 from db2 import SQLiteDB
+#from _utils import SpatiaLiteSecurity as _SpatiaLiteSecurity
 
 
 if sys.platform.startswith("linux"):
@@ -45,9 +46,42 @@ GEOM_TYPES = {
     6: "MULTIPOLYGON"
     }
 
+# Implement SPATIALITE_SECURITY handler
+#SPATIALITE_SECURITY = _SpatiaLiteSecurity()
+
 
 class SpatiaLiteError(Exception):
+    """
+    An explicit exception for use when SpatiaLite doesn't work as expected.
+
+    Example:
+    # This exemption is useful when the environment variable
+    # 'SPATIALITE_SECURITY' is required to be set to 'relaxed' but isn't.
+    # Functions such as ImportSHP will just not run, and users might beat their
+    # head against the wall wondering why their data doesn't exist.
+    """
     pass
+
+
+def enable_relaxed_security(enable=True):
+    """
+    Set the 'SPATIALITE_SECURITY' environment variable to 'relaxed'.
+    This is required by many of SpatiaLite's Import/Export functions.
+    """
+    if enable:
+        os.environ["SPATIALITE_SECURITY"] = "relaxed"
+        #SPATIALITE_SECURITY.set("relaxed")
+        return
+    #SPATIALITE_SECURITY.set("strict")
+    return
+
+
+def check_security():
+    """Raises a SpatiaLiteError when not set to 'relaxed'."""
+    #if not SPATIALITE_SECURITY.state.value == "relaxed":
+    if not os.environ["SPATIALITE_SECURITY"] == "relaxed":
+        raise SpatiaLiteError(
+            "SPATIALITE_SECURITY variable not set to 'relaxed'")
 
 
 def get_sr_from_web(srid, auth, sr_format):
@@ -219,32 +253,6 @@ class SpatiaLiteDB(SQLiteDB):
             "SELECT * FROM spatial_ref_sys WHERE srid=?", (srid,)
             ).fetchall()) == 1
 
-    def import_shp(self, filename, table_name, charset="UTF-8", srid=-1,
-                   geom_column="geometry", pk_column="PK",
-                   geometry_type="AUTO", coerce2D=0, compressed=0,
-                   spatial_index=0, text_dates=0):
-        """
-        Import a shapefile using the SpatiaLite function ImportSHP.
-        Faster than 'load_geodataframe' but much more sensitive to data errors.
-
-        Parameters
-        ----------
-
-        """
-        # Validate
-        filename = os.path.splitext(filename)[0].replace("\\", "/")
-        if not os.path.exists(filename + ".shp"):
-            raise AttributeError("cannot find path specified")
-        if not self.has_srid(srid):
-            self.get_spatial_ref_sys(srid)
-        df = self.sql(
-            "SELECT ImportSHP(?,?,?,?,?,?,?,?,?,?,?);",
-            (filename, table_name, charset, srid, geom_column, pk_column,
-             geometry_type, coerce2D, compressed, spatial_index, text_dates))
-        if table_name not in self.table_names:
-            raise SpatiaLiteError("import failed")
-        return df
-
     def load_geodataframe(self, gdf, table_name, srid, if_exists="fail",
                           geom_func="ST_GeomFromText(:geometry, :srid)"):
         """
@@ -270,16 +278,22 @@ class SpatiaLiteDB(SQLiteDB):
              By default it uses ST_GeomFromText(WKT geometry, SRID), but can
              be tailored for use with other representations.
              e.g. 'GeomFromEWKT(:geometry)', 'GeomFromGeoJSON(:geometry)', etc.
-         """
+        """
         # Get everything from GeoDataFrame except 'geometry' column
         no_geom = gdf[filter(lambda x: x != "geometry", gdf.columns)]
         # Use pandas to CREATE the table
         no_geom.to_sql(table_name, self.engine, if_exists=if_exists)
         # Get geometry type from 'geometry' column
-        geom_type = max(set(gdf["geometry"].geom_type), key=len).upper()
+        geom_types = set(gdf["geometry"].geom_type)
+        # SpatiaLite can only accept one geometry type
+        if len(geom_types) > 1:
+            # Cast geometries to Multi-type
+            gdf["geometry"] = gdf["geometry"].apply(
+                lambda x: gpd.tools.collect(x, True))
+        geom_type = max(geom_types, key=len).upper()
         # Create the geometry column (will be empty)
         self.sql("SELECT AddGeometryColumn(?, ?, ?, ?);",
-              (table_name, "geometry", srid, geom_type))
+                 (table_name, "geometry", srid, geom_type))
         # Create a new dataframe to use to UPDATE the 'geometry' column
         update_gdf = pd.DataFrame()
         # Set 'geometry' column to Well-Known Text
@@ -314,6 +328,35 @@ class SpatiaLiteDB(SQLiteDB):
                 axis=1)
         return pd.DataFrame(data=[[update, 1]], columns=["SQL", "Result"])
 
+    def import_shp(self, filename, table_name, charset="UTF-8", srid=-1,
+                   geom_column="geometry", pk_column="PK",
+                   geometry_type="AUTO", coerce2D=0, compressed=0,
+                   spatial_index=0, text_dates=0):
+        """
+        Import a shapefile using the SpatiaLite function ImportSHP.
+        Faster than 'load_geodataframe' but much more sensitive to data errors.
+
+        Parameters
+        ----------
+
+        """
+        # Validate parameters
+        check_security()
+        filename = os.path.splitext(filename)[0].replace("\\", "/")
+        if not os.path.exists(filename + ".shp"):
+            raise AttributeError("cannot find path specified")
+        if not self.has_srid(srid):
+            self.get_spatial_ref_sys(srid)
+        # Execute
+        df = self.sql(
+            "SELECT ImportSHP(?,?,?,?,?,?,?,?,?,?,?);",
+            (filename, table_name, charset, srid, geom_column, pk_column,
+             geometry_type, coerce2D, compressed, spatial_index, text_dates))
+        if table_name not in self.table_names:
+            # TODO: Hopefully this can someday be more helpful
+            raise SpatiaLiteError("import failed")
+        return df
+
     def export_shp(self, table_name, filename, geom_column="geometry",
                    charset="UTF-8", geometry_type="AUTO"):
         """
@@ -321,7 +364,8 @@ class SpatiaLiteDB(SQLiteDB):
         Note that parameters have been altered to improve functionality and
         make consistant with ImportSHP.
         """
-        # Validate
+        # Validate parameters
+        check_security()
         if table_name not in self.table_names:
             raise AttributeError("table '{}' not found".format(table_name))
         filename = os.path.splitext(filename)[0].replace("\\", "/")
@@ -334,6 +378,7 @@ class SpatiaLiteDB(SQLiteDB):
             # ExportSHP parameter order
             (table_name, geom_column, filename, charset)) #, geometry_type))
         if not os.path.exists(filename + ".shp"):
+            # TODO: Hopefully this can someday be more helpful
             raise SpatiaLiteError("export failed")
         return df  # TODO: WIP not working
 
@@ -362,6 +407,8 @@ class SpatiaLiteDB(SQLiteDB):
         """"""
         # Execute the query using the sql method of the super class
         df = super(SpatiaLiteDB, self).sql(q, data, union, limit)
+        if df.empty:
+            return df
 
         # Post-process the dataframe
         if "geometry" in df.columns:

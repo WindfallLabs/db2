@@ -20,7 +20,10 @@ from sqlalchemy.exc import ResourceClosedError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
+# Display more columns; 25 by default
 pd.set_option('display.max_columns', 25)
+# Suppress scientific notation of floats to 6 digits (default)
+pd.set_option("display.float_format", "{:20,.6f}".format)
 
 
 class Cursor(object):
