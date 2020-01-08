@@ -37,7 +37,6 @@ if sys.platform.startswith("linux"):
 else:
     MOD_SPATIALITE = "mod_spatialite"
 
-
 GEOM_TYPES = {
     1: "POINT",
     2: "LINESTRING",
@@ -158,7 +157,7 @@ class SpatiaLiteBlobElement(object):
         """
         self.blob = geom_buffer
         # Get as bytearray
-        array = bytearray(geom_buffer)
+        array = bytearray(self.blob)
         # List of Big- or Little-Endian identifiers
         endian = [">", "<"][array[1]]
 
@@ -188,108 +187,6 @@ class SpatiaLiteBlobElement(object):
         return self.ewkt
 
 
-class GeoDataFrameToSQLHandler(object):
-    def __init__(self, gdf, table_name, srid=-1, primary_key="",
-                 from_text="ST_GeomFromText", cast_to_multi=False):
-        self.gdf = gdf.copy()
-        self.table_name = table_name
-        self.primary_key = "PK_UID" if not primary_key else primary_key
-        if self.primary_key == "PK_UID" or self.primary_key not in self.gdf.columns:
-            _new_cols = self.gdf.columns.insert(0, self.primary_key)
-            self.gdf[self.primary_key] = xrange(0, len(self.gdf))
-            self.gdf = self.gdf[_new_cols]
-
-        # Check for multiple geometry types
-        geom_types = list(set(gdf["geometry"].geom_type))
-        if len(geom_types) > 1:
-            # Cast all to Multi type
-            if cast_to_multi is True:
-                self.gdf["geometry"] = self.gdf["geometry"].apply(
-                    lambda x: gpd.tools.collect(x, True))
-            else:
-                raise IntegrityError(
-                    "only geometries of a single type are allowed. Found: {}".format(geom_types))
-
-        # Handle SRIDs
-        self.srid = srid
-        # Get SRID from GeoDataFrame if in the crs
-        if self.srid == -1 and self.gdf.crs["init"].startswith("epsg"):
-            self.srid = int(self.gdf.crs["init"].split(":")[1])
-
-        self.dim = list(set(self.gdf["geometry"].apply(lambda x: x._ndim)))[0]
-
-        self.from_text = from_text
-        self.sql_types = {"str": "TEXT", "int": "INTEGER", "float": "REAL"}
-        self.schema = infer_schema(self.gdf)
-        self.column_types = OrderedDict(
-            [[k, self.sql_types[v]] for k, v in
-             self.schema["properties"].items()])
-        if isinstance(self.schema["geometry"], list):
-            self.geom_type = max(self.schema["geometry"], key=len).upper()
-        else:
-            self.geom_type = self.schema["geometry"].upper()
-        self.gdf["geometry"] = self.gdf["geometry"].apply(lambda x: x.wkt)
-
-    @property
-    def col_str(self):
-        cols = self.column_types.copy()
-        cols[self.primary_key] = cols[self.primary_key] + " PRIMARY KEY"
-        col_str = "({})".format(", ".join(
-            [" ".join([k, v]) for k, v in cols.items()]))
-        return col_str
-
-    @property
-    def create_sql(self):
-        create = "CREATE TABLE {} {};".format(self.table_name, self.col_str)
-        return create
-
-    @property
-    def add_geom_col_sql(self):
-        add_geom = "SELECT AddGeometryColumn({});"
-        params = "'{}', '{}', {}, '{}', '{}'".format(
-            self.table_name,
-            "geometry",  # Column name
-            self.srid,
-            self.geom_type,
-            self.dim)
-        return add_geom.format(params)
-
-    @property
-    def insert_sql(self):
-        return "INSERT INTO {} ({}) VALUES ({});".format(
-            self.table_name, ", ".join(self.gdf.columns), self._qmarks)
-
-    @property
-    def _qmarks(self):
-        qmarks = ", ".join(["?"] * (len(self.gdf.columns) - 1))
-        geom_from_text = ", {}(?, {})".format(self.from_text, self.srid)
-        qmarks += geom_from_text
-        return qmarks
-
-    def execute(self, db, if_exists="fail"):
-        dataframes = []
-        if db._echo:
-            print(self.create_sql)
-        db.session.execute(self.create_sql)
-        dataframes.append(pd.DataFrame(
-            data=[[self.create_sql, 1]], columns=["SQL", "Result"]))
-        if db._echo:
-            print(self.add_geom_col_sql)
-        db.session.execute(self.add_geom_col_sql)
-        dataframes.append(pd.DataFrame(
-            data=[[self.add_geom_col_sql, 1]], columns=["SQL", "Result"]))
-        db.session.commit()
-        if db._echo:
-            print("INSERTing {} rows using:".format(len(self.gdf)))
-            print(self.insert_sql)
-        for row in self.gdf.apply(OrderedDict, axis=1):
-            db.con.execute(self.insert_sql, row.values())
-        dataframes.append(pd.DataFrame(
-            data=[[self.insert_sql, len(self.gdf)]],
-            columns=["SQL", "Result"]))
-        return pd.concat(dataframes).reset_index(drop=True)
-
-
 class SpatiaLiteDB(SQLiteDB):
     """
     Utility for exploring and querying a SpatiaLite database.
@@ -313,6 +210,8 @@ class SpatiaLiteDB(SQLiteDB):
         if "geometry_columns" not in self.table_names:
             # Source: geoalchemy2 readthedocs tutorial
             self.con.execute(select([func.InitSpatialMetaData(1)]))
+
+        self.spatialite_security = "relaxed"  # TODO: State?
 
     def has_srid(self, srid):
         """Check if a spatial reference system is in the database."""
@@ -346,16 +245,74 @@ class SpatiaLiteDB(SQLiteDB):
             raise SpatiaLiteError("import failed")
         return df
 
-    def load_geodataframe(self, gdf, table_name, srid, primary_key=""):
+    def load_geodataframe(self, gdf, table_name, srid, if_exists="fail",
+                          geom_func="ST_GeomFromText(:geometry, :srid)"):
         """
-        Create a spatial table from a geopandas.GeoDataFrame
-        """
-        # TODO: rename to import_geodataframe
-        if not self.has_srid(srid):
-            self.get_spatial_ref_sys(srid)
-        gdf_sql = GeoDataFrameToSQLHandler(
-            gdf, table_name, srid, primary_key, cast_to_multi=True)
-        return gdf_sql.execute(self)
+         Creates a database table from a geopandas.GeoDataFrame
+
+         Parameters
+         ----------
+
+         gdf: pandas.GeoDataFrame
+             GeoDataFrame to load into database as a spatial table.
+         table_name: str
+             The name of the table to create from the gdf
+         srid: int
+             Spatial Reference ID for the geometry
+         if_exists: {'fail', 'replace', 'append'}, default 'fail'
+             How to behave if the table already exists.
+                 fail: Raise a ValueError.
+                 replace: Drop the table before inserting new values.
+                 append: Insert new values to the existing table.
+         geom_func: str
+             This specifies what spatial function and argument to use to
+             transform the geometry column into SpatiaLite BLOB geometries.
+             By default it uses ST_GeomFromText(WKT geometry, SRID), but can
+             be tailored for use with other representations.
+             e.g. 'GeomFromEWKT(:geometry)', 'GeomFromGeoJSON(:geometry)', etc.
+         """
+        # Get everything from GeoDataFrame except 'geometry' column
+        no_geom = gdf[filter(lambda x: x != "geometry", gdf.columns)]
+        # Use pandas to CREATE the table
+        no_geom.to_sql(table_name, self.engine, if_exists=if_exists)
+        # Get geometry type from 'geometry' column
+        geom_type = max(set(gdf["geometry"].geom_type), key=len).upper()
+        # Create the geometry column (will be empty)
+        self.sql("SELECT AddGeometryColumn(?, ?, ?, ?);",
+              (table_name, "geometry", srid, geom_type))
+        # Create a new dataframe to use to UPDATE the 'geometry' column
+        update_gdf = pd.DataFrame()
+        # Set 'geometry' column to Well-Known Text
+        if geom_func.startswith("ST_GeomFromText"):
+            update_gdf["geometry"] = gdf["geometry"].apply(shapely.wkt.dumps)
+        else:
+            update_gdf["geometry"] = gdf["geometry"]
+        # This PK column will be used to update geometries by joining on rowid
+        update_gdf["PK"] = range(1, len(update_gdf) + 1)
+        # Create the UPDATE statement
+        update = self.cur._apply_handlebars(
+            (u"UPDATE {{table_name}} "
+             u"SET geometry={{geom_func}} "
+             u"WHERE rowid=:rowid"),
+            {"table_name": table_name, "geom_func": geom_func})
+        update_gdf["update"] = update
+        # Pass srid to geom_func if it takes it as an argument
+        if ":srid" in update:
+            update_gdf.apply(
+                lambda x: self.sql(
+                    x["update"],
+                    {"geometry": x["geometry"],
+                     "srid": srid,
+                     "rowid": x["PK"]}),
+                axis=1)
+        else:
+            update_gdf.apply(
+                lambda x: self.sql(
+                    x["update"],
+                    {"geometry": x["geometry"],
+                     "rowid": x["PK"]}),
+                axis=1)
+        return pd.DataFrame(data=[[update, 1]], columns=["SQL", "Result"])
 
     def export_shp(self, table_name, filename, geom_column="geometry",
                    charset="UTF-8", geometry_type="AUTO"):
@@ -409,7 +366,12 @@ class SpatiaLiteDB(SQLiteDB):
         # Post-process the dataframe
         if "geometry" in df.columns:
             # Decode SpatiaLite BLOB and
-            df["geometry"] = df["geometry"].apply(SpatiaLiteBlobElement)
+            df["geometry"] = df["geometry"].apply(
+                lambda x: SpatiaLiteBlobElement(x) if x else None)
+            # Check for NULL geometries and if any are, bail
+            if any(df["geometry"].isna()):
+                print("NULL geometries found! Returning DataFrame...")
+                return df
             # Get Spatial Reference while geometry values are
             # SpatiaLiteBlobElement objects
             srid = df["geometry"].iat[0].srid
