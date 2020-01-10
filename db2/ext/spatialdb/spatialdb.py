@@ -304,7 +304,7 @@ class SpatiaLiteDB(SQLiteDB):
         # This PK column will be used to update geometries by joining on rowid
         update_gdf["PK"] = range(1, len(update_gdf) + 1)
         # Create the UPDATE statement
-        update = self.cur._apply_handlebars(
+        update = self._apply_handlebars(
             (u"UPDATE {{table_name}} "
              u"SET geometry={{geom_func}} "
              u"WHERE rowid=:rowid"),
@@ -429,7 +429,9 @@ class SpatiaLiteDB(SQLiteDB):
 
             # Get spatial reference authority and proj4text
             auth, proj = self.engine.execute(
-                "SELECT auth_name, proj4text FROM spatial_ref_sys WHERE auth_srid = ?",
+                ("SELECT auth_name, proj4text "
+                 "FROM spatial_ref_sys "
+                 "WHERE auth_srid = ?"),
                 (srid,)
                 ).fetchone()
 
@@ -443,7 +445,10 @@ class SpatiaLiteDB(SQLiteDB):
     @property
     def geometries(self):
         """Return the contents of table `geometry_columns` and srs info."""
-        return self.sql("SELECT * FROM geometry_columns g LEFT JOIN spatial_ref_sys s ON g.srid=s.srid")
+        return self.sql(
+            ("SELECT * FROM geometry_columns g "
+             "LEFT JOIN spatial_ref_sys s "
+             "ON g.srid=s.srid"))
 
     def get_geometry_data(self, table_name):
         return self.geometries[self.geometries["f_table_name"] == table_name
