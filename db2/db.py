@@ -330,12 +330,11 @@ class DB(object):
         # Create engine
         self.engine = create_engine(self._url)
 
-        # Load extensions  # TODO: is this SQLite-specific?
-        if self._extensions:
-            listen(self.engine, 'connect', self._load_extensions)
-
-        # Connect
-        self.con = self.engine.connect()
+        # Get DBAPI connection and cursor objects on connect
+        listen(self.engine, 'connect', self._on_connect)
+        # Connect (Creates SQLA Connection and DBAPI Connection)
+        self.con = self.engine.connect()  # Also creates self.dbapi_con
+        # DBAPI Cursor
         self.cur = Cursor(self)
 
         # Create session (WIP)
@@ -376,11 +375,9 @@ class DB(object):
         kwargs["port"] = ":{}".format(kwargs["port"]) if kwargs["port"] else ""
         return temp.format(**kwargs)
 
-    def _load_extensions(self, conn, _):
-        """Loads all specified extensions."""
-        conn.enable_load_extension(True)
-        for ext in self._extensions:
-            conn.load_extension(ext)
+    def _on_connect(self, conn, _):
+        """Get DBAPI2 Connection."""
+        setattr(self, "dbapi_con", conn)
         return
 
     @property
@@ -600,6 +597,14 @@ class SQLiteDB(DB):
             dbtype="sqlite",
             echo=echo,
             extensions=extensions)
+
+    def _on_connect(self, conn, _):
+        """Get DBAPI2 Connection and load all specified extensions."""
+        setattr(self, "dbapi_con", conn)
+        self.dbapi_con.enable_load_extension(True)
+        for ext in self._extensions:
+            self.dbapi_con.load_extension(ext)
+        return
 
     def __str__(self):
         return "SQLite[SQLite] > {dbname}".format(dbname=self.dbname)
