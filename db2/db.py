@@ -324,8 +324,13 @@ class DB(object):
                                   columns=["SQL", "Result"])
             return df
 
-    def load_dataframe(self, df, enforcer=None):
-        pass
+    def load_dataframe(self, df, table_name):
+        """
+        Loads a DataFrame as a database table.
+        """
+        # TODO: enforce datatypes and column name requirements
+        df.to_sql(table_name, self.engine)
+        return
 
     def create_mapping(self, mapping):
         """Creates a table from a mapping object."""
@@ -354,7 +359,7 @@ class SQLiteDB(DB):
 
     Parameters
     ----------
-    filename: str
+    dbname: str
         Path to SQLite database or ":memory:" for in-memory database
     echo: bool
         Whether or not to repeat queries and messages back to user
@@ -381,24 +386,29 @@ class SQLiteDB(DB):
             self.dbapi_con.load_extension(ext)
         return
 
-    def attach_db(self, db_path, alias=None):
-        """Wrapper for `ATTACH DATABASE <file> AS <name>`."""
+    def attach_db(self, db_path, name=None):
+        """
+        Attaches a database with `ATTACH DATABASE :file AS :name;`.
+        """
         # Default name to filename
-        if not alias:
-            alias = os.path.basename(db_path).split(".")[0]
-        self.cur.execute("ATTACH ? AS ?;", (db_path, alias))
+        if name is None:
+            name = os.path.basename(db_path).split(".")[0]
+        self.cur.execute("ATTACH :file AS :name;",
+                         {"file": db_path, "name": name})
 
         # Append alias and path to self.databases dataframe
-        self.databases.loc[len(self.databases)] = [alias, db_path]
+        self.databases.loc[len(self.databases)] = [name, db_path]
         return self.cur.fetchall()
 
-    def detach_db(self, alias):
-        """Wrapper for `DETACH DATABASE <name>`."""
-        self.cur.execute("DETACH DATABASE ?;", (alias,))
+    def detach_db(self, name):
+        """
+        Detaches an attached database with  `DETACH DATABASE :name;`.
+        """
+        self.cur.execute("DETACH DATABASE :name;", {"name": name})
 
         # Remove the alias from self.databases dataframe
         self.databases.drop(
-            self.databases[self.databases["name"] == alias].index,
+            self.databases[self.databases["name"] == name].index,
             inplace=True)
         return self.cur.fetchall()
 

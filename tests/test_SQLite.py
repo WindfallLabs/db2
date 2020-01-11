@@ -19,6 +19,9 @@ class TestSQLite(unittest.TestCase):
         self.assertEqual(
             d.databases["file"].tolist(),
             [":memory:", "./chinook.sqlite"])
+        self.assertEqual(
+            d.databases["name"].tolist(),
+            ["main", "chinook"])
         # Detach
         d.detach_db("chinook")
         self.assertEqual(
