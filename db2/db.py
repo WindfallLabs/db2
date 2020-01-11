@@ -1,11 +1,12 @@
-# -*- coding: utf-8 -*-
 # !/usr/bin/env python2
 """
 db module
 """
 
+import os
 import re
 import sys
+from collections import OrderedDict
 
 try:
     from urllib import quote_plus
@@ -263,6 +264,14 @@ class DB(object):
         ...               {"col": "Name"})
 
         """
+        # Ensure SQL is unicode
+        if (sys.version_info < (3, 0)):
+            sql = unicode(sql)
+
+        # Ensure SQL ends with a semicolon
+        if not sql.endswith(";"):
+            sql = sql + ";"
+
         dataframes = []
         # Execute script
         if len(re.findall(";", sql)) > 1:
@@ -287,9 +296,6 @@ class DB(object):
 
         # Execute single statement
         else:
-            if (sys.version_info < (3, 0)):
-                sql = unicode(sql)
-
             # Apply limit if supplied
             # Code for yhat's method 'DB._apply_limit' is embeded here
             if limit:  # TODO: and security is 'relaxed'
@@ -362,6 +368,11 @@ class SQLiteDB(DB):
             echo=echo,
             extensions=extensions)
 
+        # Similar functionality to sqlite command ".databases"
+        self.databases = pd.DataFrame(
+            OrderedDict([("name", "main"), ("file", self.dbname)]),
+            index=[0])
+
     def _on_connect(self, conn, _):
         """Get DBAPI2 Connection and load all specified extensions."""
         setattr(self, "dbapi_con", conn)
@@ -369,6 +380,27 @@ class SQLiteDB(DB):
         for ext in self._extensions:
             self.dbapi_con.load_extension(ext)
         return
+
+    def attach_db(self, db_path, alias=None):
+        """Wrapper for `ATTACH DATABASE <file> AS <name>`."""
+        # Default name to filename
+        if not alias:
+            alias = os.path.basename(db_path).split(".")[0]
+        self.cur.execute("ATTACH ? AS ?;", (db_path, alias))
+
+        # Append alias and path to self.databases dataframe
+        self.databases.loc[len(self.databases)] = [alias, db_path]
+        return self.cur.fetchall()
+
+    def detach_db(self, alias):
+        """Wrapper for `DETACH DATABASE <name>`."""
+        self.cur.execute("DETACH DATABASE ?;", (alias,))
+
+        # Remove the alias from self.databases dataframe
+        self.databases.drop(
+            self.databases[self.databases["name"] == alias].index,
+            inplace=True)
+        return self.cur.fetchall()
 
     def __str__(self):
         return "SQLite[SQLite] > {dbname}".format(dbname=self.dbname)

@@ -1,78 +1,112 @@
 # !/usr/bin/env python2
-"""
-"""
 
-import os
-import six
-from abc import ABCMeta
+import re
+import struct
+import urllib2
+
+import shapely
 
 
-@six.add_metaclass(ABCMeta)
-class _SecurityState(object):
-    name = ""
-    value = ""
-    allowed = []
+def get_sr_from_web(srid, auth, sr_format):
+    """
+    Get spatial reference data from spatialreference.org
 
-    def switch(self, state):
-        """ Switch to new state """
-        if state.value in self.allowed:
-            print("======== Switched! ========")
-            os.environ["SPATIALITE_SECURITY"] = state.value
-            self.__class__ = state
-        else:
-            pass  # Changing state to current state does nothing
+    Parameters
+    ----------
+    srid: int
+        Spatial Reference ID
+    auth: str
+        Name of authority {epsg, esri, sr-org}
+    sr_format: str
+        Desired format of spatial reference data
+    """
+    _formats = [
+        'html',
+        'prettywkt',
+        'proj4',
+        'json',
+        'gml',
+        'esriwkt',
+        'mapfile',
+        'mapserverpython',
+        'mapnik',
+        'mapnikpython',
+        'geoserver',
+        'postgis',
+        'spatialite',  # Derivative of PostGIS
+        'proj4js'
+        ]
+
+    _authorities = [
+        "epsg",
+        "esri",
+        "sr-org"]
+
+    # Validate inputs
+    srid = int(srid)
+    auth = auth.lower()
+    sr_format = sr_format.lower()
+    if auth not in _authorities:
+        raise ValueError("{} is not a valid authority".format(auth))
+    if sr_format not in _formats:
+        raise ValueError("{} is not a valid format".format(sr_format))
+    site = "https://spatialreference.org/ref/{0}/{1}/{2}/".format(
+        auth, srid, sr_format)
+
+    # SpatiaLite (derive from PostGIS)
+    if sr_format == "spatialite":
+        site = site.replace("spatialite", "postgis")
+        data = urllib2.urlopen(site).read()
+        # The srid value has a leading 9 in the PostGIS INSERT statement
+        data = re.sub("9{}".format(srid), str(srid), data, count=1)
+    else:
+        data = urllib2.urlopen(site).read()
+    return data
+
+
+
+class SpatiaLiteBlobElement(object):
+    """
+    SpatiaLite Blob Element
+    """
+    def __init__(self, geom_buffer):
+        """
+        Decodes a SpatiaLite BLOB geometry into a Spatial Reference and
+        Well-Known Binary representation
+        See specification: https://www.gaia-gis.it/gaia-sins/BLOB-Geometry.html
+
+        Parameters
+        ----------
+        geom_buffer: buffer
+            The geometry type native to SpatiaLite (BLOB geometry)
+        """
+        self.blob = geom_buffer
+        # Get as bytearray
+        array = bytearray(self.blob)
+        # List of Big- or Little-Endian identifiers
+        endian = [">", "<"][array[1]]
+
+        # Decode the Spatial Reference ID
+        self.srid = "{}".format(struct.unpack(endian + 'i', array[2:6])[0])
+
+        # Create WKB from Endian (pos 1) and SpatiaLite-embeded WKB data
+        # at pos 39+
+        self.wkb = str(geom_buffer[1] + array[39:-1])
+
+    @property
+    def as_shapely(self):
+        """Return SpatiaLite BLOB as shapely object."""
+        return shapely.wkb.loads(self.wkb)
+
+    @property
+    def as_wkt(self):
+        """Return SpatiaLite BLOB as Well Known Text."""
+        return shapely.wkt.dumps(self.as_shapely)
+
+    @property
+    def as_ewkt(self):
+        """Return SpatiaLite BLOB as Extended Well-Known Text."""
+        return "SRID={};{}".format(self.srid, self.as_wkt)
 
     def __str__(self):
-        return "SPATIALITE_SECURITY = '{}'".format(self.value)
-
-    def __repr__(self):
-        return "<{}: environment var {}>".format(
-            self.name, self.__str__())
-
-
-class _StrictSecurity(_SecurityState):
-    name = "off"
-    value = "strict"
-    allowed = ['relaxed']
-
-
-class _RelaxedSecurity(_SecurityState):
-    """ State of being powered on and working """
-    name = "on"
-    value = "relaxed"
-    allowed = ['relaxed']
-
-
-class SpatiaLiteSecurity(object):
-    """Controller for setting the SPATIALITE_SECURITY environment variable."""
-    __instance = None
-
-    @staticmethod
-    def getInstance():
-        if SpatiaLiteSecurity.__instance is None:
-            SpatiaLiteSecurity()
-        return SpatiaLiteSecurity.__instance
-
-    def __init__(self):
-        """Default to 'strict' security."""
-        # Singleton logic
-        if SpatiaLiteSecurity.__instance is not None:
-            raise TypeError("instance of singleton class 'SpatiaLiteSecurity'"
-                            "already exists.")
-        else:
-            SpatiaLiteSecurity.__instance = self
-
-        # Default env var to 'strict' even if set at the system level
-        os.environ["SPATIALITE_SECURITY"] = "strict"
-        self.state = _StrictSecurity()
-
-    def set_security(self, state):
-        """Change state of security"""
-        self.state.switch(state)
-
-    def __str__(self):
-        return "SpatiaLite Security Switch object: set to '{}'".format(
-            self.state.value)
-
-    def __repr__(self):
-        return "<{}>".format(self.__str__())
+        return self.ewkt

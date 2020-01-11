@@ -15,22 +15,16 @@ pip install GDAL==$(gdal-config --version) --global-option=build_ext --global-op
 """
 
 import os
-import re
-import struct
 import sys
-import urllib2
-from collections import OrderedDict
-from sqlite3 import IntegrityError
 
 import fiona
 import geopandas as gpd
 import pandas as pd
 import shapely.wkt
-from geopandas.io.file import infer_schema
 from sqlalchemy import func, select
 
 from db2 import SQLiteDB
-#from _utils import SpatiaLiteSecurity as _SpatiaLiteSecurity
+from ._utils import *
 
 
 if sys.platform.startswith("linux"):
@@ -46,8 +40,47 @@ GEOM_TYPES = {
     6: "MULTIPOLYGON"
     }
 
+
+class _SpatiaLiteSecurity(object):
+    """
+    Object for locally handling the SPATIALITE_SECURITY environment variable.
+    """
+    __instance = None
+
+    @staticmethod
+    def getInstance():
+        if _SpatiaLiteSecurity.__instance is None:
+            _SpatiaLiteSecurity()
+        return _SpatiaLiteSecurity.__instance
+
+    def __init__(self):
+        """Default to 'strict' security."""
+        # Singleton logic
+        if _SpatiaLiteSecurity.__instance is not None:
+            raise TypeError("instance of singleton class 'SpatiaLiteSecurity'"
+                            "already exists.")
+        else:
+            _SpatiaLiteSecurity.__instance = self
+
+        # Set Default value for "SPATIALITE_SECURITY" if not set
+        os.environ.setdefault("SPATIALITE_SECURITY", "strict")
+
+    def get(self):
+        return os.environ["SPATIALITE_SECURITY"]
+
+    def set(self, value="strict"):
+        os.environ["SPATIALITE_SECURITY"] = value
+        return
+
+    def __str__(self):
+        return "SPATIALITE_SECURITY = '{}'".format(self.get())
+
+    def __repr__(self):
+        return "<_SpatiaLiteSecurity: {}>".format(self.__str__())
+
+
 # Implement SPATIALITE_SECURITY handler
-#SPATIALITE_SECURITY = _SpatiaLiteSecurity()
+SPATIALITE_SECURITY = _SpatiaLiteSecurity()
 
 
 class SpatiaLiteError(Exception):
@@ -63,162 +96,11 @@ class SpatiaLiteError(Exception):
     pass
 
 
-def enable_relaxed_security(enable=True):
-    """
-    Set the 'SPATIALITE_SECURITY' environment variable to 'relaxed'.
-    This is required by many of SpatiaLite's Import/Export functions.
-    """
-    if enable:
-        os.environ["SPATIALITE_SECURITY"] = "relaxed"
-        #SPATIALITE_SECURITY.set("relaxed")
-        return
-    #SPATIALITE_SECURITY.set("strict")
-    return
-
-
 def check_security():
     """Raises a SpatiaLiteError when not set to 'relaxed'."""
-    #if not SPATIALITE_SECURITY.state.value == "relaxed":
     if not os.environ["SPATIALITE_SECURITY"] == "relaxed":
         raise SpatiaLiteError(
             "SPATIALITE_SECURITY variable not set to 'relaxed'")
-
-
-def get_sr_from_web(srid, auth, sr_format):
-    """
-    Get spatial reference data from spatialreference.org
-
-    Parameters
-    ----------
-    srid: int
-        Spatial Reference ID
-    auth: str
-        Name of authority {epsg, esri, sr-org}
-    sr_format: str
-        Desired format of spatial reference data
-    """
-    _formats = [
-        'html',
-        'prettywkt',
-        'proj4',
-        'json',
-        'gml',
-        'esriwkt',
-        'mapfile',
-        'mapserverpython',
-        'mapnik',
-        'mapnikpython',
-        'geoserver',
-        'postgis',
-        'spatialite',  # Derivative of PostGIS
-        'proj4js'
-        ]
-
-    _authorities = [
-        "epsg",
-        "esri",
-        "sr-org"]
-
-    # Validate inputs
-    srid = int(srid)
-    auth = auth.lower()
-    sr_format = sr_format.lower()
-    if auth not in _authorities:
-        raise ValueError("{} is not a valid authority".format(auth))
-    if sr_format not in _formats:
-        raise ValueError("{} is not a valid format".format(sr_format))
-    site = "https://spatialreference.org/ref/{0}/{1}/{2}/".format(
-        auth, srid, sr_format)
-
-    # SpatiaLite (derive from PostGIS)
-    if sr_format == "spatialite":
-        site = site.replace("spatialite", "postgis")
-        data = urllib2.urlopen(site).read()
-        # The srid value has a leading 9 in the PostGIS INSERT statement
-        data = re.sub("9{}".format(srid), str(srid), data, count=1)
-    else:
-        data = urllib2.urlopen(site).read()
-    return data
-
-
-'''
-class _ColumnFactory():
-    def create_column(self, typ):
-        if typ.startswith("date"):
-            typ = typ.replace("date", "str")
-        col_type = typ.split(":")[0]
-
-        if col_type == "str":
-            return Column(
-                Text(typ.split(":")[1]))
-        elif col_type == "int":
-            if typ.split(":")[1] == "primary":
-                return Column(Integer, primary_key=True)
-            return Column(Integer)
-        elif col_type == "float":
-            return Column(Float)
-        elif col_type == "geometry":
-            geom_type = typ.split(":")[1].replace("3D", "").strip().upper()
-            return Column(
-                Geometry(geometry_type=geom_type, management=True))
-
-
-schema = OrderedDict([("__tablename__", "test"), (u"PK_UID", "int:primary")])
-schema.update(shp.schema["properties"])
-schema[u"geometry"] = u"geometry:{}".format(shp.schema["geometry"])
-
-for k, v in schema.items():
-    if k == "__tablename__":
-        continue
-    schema[k] = _ColumnFactory().create_column(v)
-'''
-
-
-class SpatiaLiteBlobElement(object):
-    """
-    SpatiaLite Blob Element
-    """
-    def __init__(self, geom_buffer):
-        """
-        Decodes a SpatiaLite BLOB geometry into a Spatial Reference and
-        Well-Known Binary representation
-        See specification: https://www.gaia-gis.it/gaia-sins/BLOB-Geometry.html
-
-        Parameters
-        ----------
-        geom_buffer: buffer
-            The geometry type native to SpatiaLite (BLOB geometry)
-        """
-        self.blob = geom_buffer
-        # Get as bytearray
-        array = bytearray(self.blob)
-        # List of Big- or Little-Endian identifiers
-        endian = [">", "<"][array[1]]
-
-        # Decode the Spatial Reference ID
-        self.srid = "{}".format(struct.unpack(endian + 'i', array[2:6])[0])
-
-        # Create WKB from Endian (pos 1) and SpatiaLite-embeded WKB data
-        # at pos 39+
-        self.wkb = str(geom_buffer[1] + array[39:-1])
-
-    @property
-    def as_shapely(self):
-        """Return SpatiaLite BLOB as shapely object."""
-        return shapely.wkb.loads(self.wkb)
-
-    @property
-    def as_wkt(self):
-        """Return SpatiaLite BLOB as Well Known Text."""
-        return shapely.wkt.dumps(self.as_shapely)
-
-    @property
-    def as_ewkt(self):
-        """Return SpatiaLite BLOB as Extended Well-Known Text."""
-        return "SRID={};{}".format(self.srid, self.as_wkt)
-
-    def __str__(self):
-        return self.ewkt
 
 
 class SpatiaLiteDB(SQLiteDB):
@@ -362,7 +244,7 @@ class SpatiaLiteDB(SQLiteDB):
         """
         Export a shapefile using the SpatiaLite function ExportSHP.
         Note that parameters have been altered to improve functionality and
-        make consistant with ImportSHP.
+        make consistent with ImportSHP.
         """
         # Validate parameters
         check_security()
@@ -461,11 +343,6 @@ class SpatiaLiteDB(SQLiteDB):
     def __repr__(self):
         return self.__str__()
 
-
-'''
-type(table_name,(declarative_base(bind=self.engine),),
-            {"__tablename__": table_name, "__table_args__": {"autoload": True}})
-'''
 
 # TODO: make SpatialDB superclass or abstract class(?)
 '''

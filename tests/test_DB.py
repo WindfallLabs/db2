@@ -14,19 +14,21 @@ from sqlalchemy.ext.declarative import declarative_base
 from db2 import DB, SQLiteDB
 
 
-class TestDatabaseTables(unittest.TestCase):
+class TestDatabaseProperties(unittest.TestCase):
     def setUp(self):
         self.d = DB(dbname=":memory:", dbtype="sqlite")
 
-    def tearDown(self):
-        del self.d
+    def test_dbtype(self):
+        self.assertTrue(self.d.dbtype == "sqlite")
+        self.assertTrue(self.d.dbname == ":memory:")
+
 
     def test_table_names_one(self):
         # New db has no tables
         self.assertEqual(self.d.table_names, [])
         # Create 1 table
-        self.d.engine.execute("CREATE TABLE test (id INT PRIMARY KEY)")
-        self.assertEqual(self.d.table_names, ["test"])
+        self.d.engine.execute("CREATE TABLE test0 (id INT PRIMARY KEY)")
+        self.assertEqual(self.d.table_names, ["test0"])
 
     def test_table_names_two(self):
         # Create 2 tables
@@ -58,16 +60,34 @@ class TestSQL(unittest.TestCase):
             {"id": 3, "name": "Aerosmith"}
             ]
         self.d.sql("CREATE TABLE test (id INT PRIMARY KEY, name TEXT)")
-        self.d.sql(
+        # Test the returned DataFrame
+        return_db = self.d.sql(
             "INSERT INTO test VALUES ({{id}}, '{{name}}')",
             insert_data,
             union=False)
+        self.assertEqual(
+            return_db["SQL"].tolist(),
+            [
+                "INSERT INTO test VALUES (1, 'AC/DC');",
+                "INSERT INTO test VALUES (2, 'Accept');",
+                "INSERT INTO test VALUES (3, 'Aerosmith');"])
+        # Test the DataFrame returned from a SELECTion of data
         expected = pd.DataFrame(
             data=[
                 [1, "AC/DC"],
                 [2, "Accept"],
                 [3, "Aerosmith"]],
             columns=["id", "name"])
+        t = self.d.sql("SELECT * FROM test", limit=3)
+        self.assertEqual(len(t), 3)
+        self.assertEqual(list(t.columns), list(expected.columns))
+        self.assertEqual(t["name"].iat[0], expected["name"].iat[0])
+
+    def test_script(self):
+        # NOTICE: how there is only one ';' in the following script
+        self.d.sql("CREATE TABLE test (id INT PRIMARY KEY, name TEXT); "
+                   "INSERT INTO test VALUES (0, 'AC/DC')")
+        expected = pd.DataFrame(data=[[1, 'AC/DC']], columns=['id', 'name'])
         t = self.d.sql("SELECT * FROM test")
         self.assertEqual(list(t.columns), list(expected.columns))
         self.assertEqual(t["name"].iat[0], expected["name"].iat[0])
