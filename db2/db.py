@@ -445,6 +445,7 @@ class MSSQLDB(DB):
             dbtype="mssql",
             driver=driver,
             echo=echo)
+        self.sql("USE {{dbname}};", {"dbname": dbname})
 
     @property
     def table_names(self):
