@@ -7,6 +7,7 @@ import os
 import re
 import sys
 from collections import OrderedDict
+from sqlite3 import Row
 
 try:
     from urllib import quote_plus
@@ -20,6 +21,14 @@ from sqlalchemy.event import listen
 from sqlalchemy.exc import ResourceClosedError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+
+
+__all__ = [
+    "DB",
+    "SQLiteDB",
+    "PostgresDB",
+    "MSSQLDB"
+    ]
 
 # Display more columns; 25 by default
 pd.set_option('display.max_columns', 25)
@@ -372,6 +381,8 @@ class SQLiteDB(DB):
             dbtype="sqlite",
             echo=echo,
             extensions=extensions)
+        # TODO: consider using Row factories
+        # self._set_row_factory(Row)
 
         # Similar functionality to sqlite command ".databases"
         self.databases = pd.DataFrame(
@@ -384,6 +395,12 @@ class SQLiteDB(DB):
         self.dbapi_con.enable_load_extension(True)
         for ext in self._extensions:
             self.dbapi_con.load_extension(ext)
+        return
+
+    def _set_row_factory(self, factory):
+        """Change how cursors return database records."""
+        self.dbapi_con.row_factory = factory
+        self.cur = self.dbapi_con.cursor()
         return
 
     def attach_db(self, db_path, name=None):
