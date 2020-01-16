@@ -16,6 +16,7 @@ except ImportError:
 
 import pandas as pd
 import pybars
+import sqlparse
 from sqlalchemy import create_engine
 from sqlalchemy.event import listen
 from sqlalchemy.exc import ResourceClosedError
@@ -235,103 +236,124 @@ class DB(object):
         return query + (";" if not query.endswith(";")
                         and has_semicolon is True else "")
 
-    def sql(self, sql, data=None, union=False, limit=None):
+    @staticmethod
+    def clean_sql(sql, rm_comments=True, rm_blanks=True,
+                  rm_indents=False, **kwargs):
+        # Remove comments
+        if rm_comments:
+            # Get anything before -- comments
+            sql = "\n".join([s.split("--")[0] for s in sql.split("\n")])
+            # Get anything inside /* */ comments
+            sql = re.sub("(((/\*)+?[\w\W]+?(\*/)+))", "", sql)
+        # Remove blank lines
+        if rm_blanks:
+            sql = "\n".join([s for s in sql.split("\n") if s.strip()])
+        if rm_indents:
+            sql = "\n".join([s.strip() for s in sql.split("\n") if s.strip()])
+        if kwargs:
+            sql = sqlparse.format(sql, **kwargs)
+        return sql
+
+    def _concat_dfs(func):
+        """Decorates DB.sql()."""
+        def sql_wrapper(d, sql, data=None):
+            """
+            Executes one or more SQL statements and returns a DataFrame of the
+            results.
+
+            Parameters
+            ----------
+            d: database object (handled by self)
+            sql: str
+                The SQL to be executed. May be a single statement/query or
+                script of multiple statements. Placeholders are allowed
+                (varies by dbtype).
+            data: a dict or tuple; or, a list or tuple of tuples or dicts.
+                A container of variables to pass to placeholders in the SQL at
+                runtime.
+            """
+            dfs = []
+            # Sloppy, but functional
+            try:
+                return pd.read_sql(sql, d.con)
+            except:
+                pass
+            for stmt in sqlparse.parse(sql):
+                dfs.append(func(d, stmt.value, data))
+            return pd.concat(dfs).reset_index(drop=True)
+        return sql_wrapper
+
+    @_concat_dfs
+    def sql(self, sql, data=None):
+        # Apply handlebars to single statement
+        if isinstance(data, dict) and "{{" in sql:
+            sql = self._apply_handlebars(sql, data)
+            cursor = self.cur.execute(sql)
+        # Use placeholders/variables
+        elif data is not None:
+            # Execute many (iterate SQL over input data)
+            if (isinstance(data, (list, tuple))
+                    and isinstance(data[0], (dict, tuple))):
+                for dat in data:
+                    # Iteratively apply handlebars to statement
+                    if "{{" in sql:
+                        self.cur.execute(self._apply_handlebars(sql, dat))
+                    else:
+                        self.cur.execute(sql, dat)
+                return pd.DataFrame([[sql, len(data)]],
+                                      columns=["SQL", "Result"])
+            # Execute single with placeholders/variables
+            else:
+                cursor = self.cur.execute(sql, data)
+        else:
+            # Execute single statement without placeholders/variables
+            cursor = self.cur.execute(sql)
+
+        try:
+            # Get column names from cursor
+            columns = [i[0] for i in cursor.description]
+        except TypeError:
+            # If the SQL doesn't return column names in the cursor.description
+            columns = ["SQL", "Result"]
+        except AttributeError:
+            # MSSQL: Cursor does not have description or fetchall()
+            columns = ["SQL", "Result"]
+
+        # Get the data
+        try:
+            data = cursor.fetchall()
+        except AttributeError:
+            # MSSQL
+            data = None
+
+        # Executed SQL did not return columns or data
+        if columns == ["SQL", "Result"] and data in ([], None):
+            data = [[sql, 1]]
+        # Executed SQL returned an empty table
+        elif columns != ["SQL", "Result"] and data in ([], None):
+            data = None
+
+        if self._echo:
+            print(sql)
+        return pd.DataFrame(data, columns=columns)
+
+    def execute_script_file(self, filename, data=None):
         """
-        Executes an SQL statement. The SQL statement may be parameterized
-        (i. e. placeholders instead of SQL literals) using either native
-        placeholders or handlebars style placeholders.
+        Executes an SQL script from a file.
 
         Parameters
         ----------
-        sql: unicode str
-            SQL statement to execute.
-        data: tuple or dict
-            Input data to submit to parameterized statement
-        union:
 
-        limit:
-
-        Examples
-        --------
-        >>> d = DB(dbname=":memory:", dbtype="sqlite")
-        # Execute an unparameterized statement:
-        >>> d.sql(
-        ...     "CREATE TABLE Artist (ArtistId INT PRIMARY KEY, Name TEXT)")
-
-        # Execute statements parameterized in the qmark style:
-        >>> d.sql("INSERT INTO Artist VALUES (?, ?)", (1, "AC/DC"))
-        >>> d.sql("INSERT INTO Artist VALUES (?, ?)", (2, "Accept"))
-
-        # Execute statements parameterized in the named style:
-        >>> d.sql("SELECT * FROM Artist where Name=:who",
-        ...               {"who": "AC/DC")
-
-        # Execute statements parameterized in the handlebars style:
-        # (similar to named style, but can be used where native placeholders
-        # are not normally allowed)
-        >>> d.sql("SELECT {{col}} FROM Artist WHERE AritstId = 2",
-        ...               {"col": "Name"})
-
+        filename: str
+            Path to the file containing SQL to be executed.
+        data: dict
+            Dictionary mapping script variables to values via PyBars.
         """
-        # Ensure SQL is unicode
-        if (sys.version_info < (3, 0)):
-            sql = unicode(sql)
-
-        # Ensure SQL ends with a semicolon
-        if not sql.endswith(";"):
-            sql = sql + ";"
-
-        dataframes = []
-        # Execute script
-        if len(re.findall(";", sql)) > 1:
-            for stmt in [i.strip() for i in sql.split(";") if i]:
-                dataframes.append(self.sql(stmt, data))
-            return pd.concat(dataframes).reset_index(drop=True)
-
-        # Execute many (data is list)
-        elif isinstance(data, list):
-            cnt = 0
-            for d in data:
-                # Iterate the stmt over the data applying handlebars style
-                dataframes.append(self.sql(sql, d))
-                cnt += 1
-            return_df = pd.concat(dataframes).reset_index(drop=True)
-            if len(return_df) <= self._max_return_rows:
-                return return_df
-            # Show parameterized rather than each stmt in result
-            return pd.DataFrame(
-                data=[[sql, cnt]],
-                columns=["SQL", "Result"])
-
-        # Execute single statement
-        else:
-            # Apply limit if supplied
-            # Code for yhat's method 'DB._apply_limit' is embeded here
-            if limit:  # TODO: and security is 'relaxed'
-                sql = sql.rstrip().rstrip(";")
-
-                if self.dbtype == "mssql":
-                    sql = "SELECT TOP {limit} * FROM ({sql}) q".format(
-                        sql=sql, limit=limit)
-                else:
-                    sql = "SELECT * FROM ({sql}) q LIMIT {limit}".format(
-                        sql=sql, limit=limit)
-
-            try:
-                # Check for native placeholders first
-                if re.findall(re.compile("|".join(self._placeholders)), sql) \
-                        and isinstance(data, (tuple, dict)):
-                    df = pd.read_sql(sql, self.con, params=data)
-                # Then handlebars
-                else:
-                    sql = self._apply_handlebars(sql, data, union)
-                    df = pd.read_sql(sql, self.con)
-
-            except (TypeError, ResourceClosedError):
-                # Just because it errors doesn't mean stmts didn't execute
-                df = pd.DataFrame(data=[[sql, 1]],
-                                  columns=["SQL", "Result"])
-            return df
+        if not os.path.exists(filename):
+            raise AttributeError("input file not found")
+        with open(filename, "r") as f:
+            script = self._apply_handlebars(f.read(), data)
+        return self.sql(script, data)
 
     def load_dataframe(self, df, table_name):
         """

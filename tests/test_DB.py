@@ -45,52 +45,97 @@ class TestSQL(unittest.TestCase):
     def tearDown(self):
         del self.d
 
-    def test_insert(self):
-        self.d.sql("CREATE TABLE test (id INT PRIMARY KEY, name TEXT)")
-        self.d.sql("INSERT INTO test VALUES (0, 'AC/DC')")
-        expected = pd.DataFrame(data=[[1, 'AC/DC']], columns=['id', 'name'])
-        t = self.d.sql("SELECT * FROM test")
-        self.assertEqual(list(t.columns), list(expected.columns))
-        self.assertEqual(t["name"].iat[0], expected["name"].iat[0])
-
-    def test_insert_many(self):
-        insert_data = [
-            {"id": 1, "name": "AC/DC"},
-            {"id": 2, "name": "Accept"},
-            {"id": 3, "name": "Aerosmith"}
-            ]
-        self.d.sql("CREATE TABLE test (id INT PRIMARY KEY, name TEXT)")
-        # Test the returned DataFrame
-        return_db = self.d.sql(
-            "INSERT INTO test VALUES ({{id}}, '{{name}}')",
-            insert_data,
-            union=False)
-        self.assertEqual(
-            return_db["SQL"].tolist(),
-            [
-                "INSERT INTO test VALUES (1, 'AC/DC');",
-                "INSERT INTO test VALUES (2, 'Accept');",
-                "INSERT INTO test VALUES (3, 'Aerosmith');"])
-        # Test the DataFrame returned from a SELECTion of data
-        expected = pd.DataFrame(
-            data=[
-                [1, "AC/DC"],
-                [2, "Accept"],
-                [3, "Aerosmith"]],
-            columns=["id", "name"])
-        t = self.d.sql("SELECT * FROM test", limit=3)
-        self.assertEqual(len(t), 3)
-        self.assertEqual(list(t.columns), list(expected.columns))
-        self.assertEqual(t["name"].iat[0], expected["name"].iat[0])
-
     def test_script(self):
-        # NOTICE: how there is only one ';' in the following script
-        self.d.sql("CREATE TABLE test (id INT PRIMARY KEY, name TEXT); "
-                   "INSERT INTO test VALUES (0, 'AC/DC')")
-        expected = pd.DataFrame(data=[[1, 'AC/DC']], columns=['id', 'name'])
-        t = self.d.sql("SELECT * FROM test")
-        self.assertEqual(list(t.columns), list(expected.columns))
-        self.assertEqual(t["name"].iat[0], expected["name"].iat[0])
+        # Test executescript
+        self.d.sql(
+            "DROP TABLE IF EXISTS test; "
+            "CREATE TABLE test (id INT PRIMARY KEY, name TEXT NOT NULL); ")
+
+    def create_test_table(self):
+        self.d.cur.execute(
+            "CREATE TABLE test (id INT PRIMARY KEY, name TEXT NOT NULL);")
+
+    def test_select_empty_dataframe(self):
+        self.create_test_table()
+        # Test execute single select, empty dataframe
+        r = self.d.sql("SELECT * FROM test")
+        self.assertEqual(r.columns.tolist(), ["id", "name"])
+        self.assertTrue(r.empty)
+
+    def test_executemany_novars(self):
+        self.create_test_table()
+        # Test executemany, no vars
+        self.d.sql("INSERT INTO test VALUES (1, 'One'); "
+                   "INSERT INTO test VALUES (2, 'Two');")
+        r = self.d.sql("SELECT * FROM test")
+        self.assertTrue(r["name"].tolist() == ["One", "Two"])
+
+    def test_executemany_qmark(self):
+        self.create_test_table()
+        # Test executemany, qmark vars
+        self.d.sql("INSERT INTO test VALUES (?, ?)",
+                   [(1, "One"), (2, "Two")])
+        r = self.d.sql("SELECT * FROM test")
+        self.assertTrue(r["name"].tolist() == ["One", "Two"])
+
+    def test_executemany_named(self):
+        self.create_test_table()
+        # Test executemany, named vars
+        self.d.sql("INSERT INTO test VALUES (:id, :name)",
+                   [{"id": 1, "name": "One"},
+                    {"id": 2, "name": "Two"}])
+        r = self.d.sql("SELECT * FROM test")
+        self.assertTrue(r["name"].tolist() == ["One", "Two"])
+
+    def test_executemany_handlebars(self):
+        self.create_test_table()
+        # Test executemany, handlebars
+        self.d.sql("INSERT INTO test VALUES ({{id}}, '{{name}}')",
+                   [{"id": 1, "name": "One"},
+                    {"id": 2, "name": "Two"}])
+        r = self.d.sql("SELECT * FROM test")
+        self.assertTrue(r["name"].tolist() == ["One", "Two"])
+
+    def test_single_select_novars(self):
+        self.create_test_table()
+        self.d.sql("INSERT INTO test VALUES (1, 'One'); "
+                   "INSERT INTO test VALUES (2, 'Two'); "
+                   "INSERT INTO test VALUES (3, 'Three');")
+        # Test execute single select, no vars
+        r = self.d.sql("SELECT * FROM test LIMIT 2")
+        self.assertTrue(r["name"].tolist() == ["One", "Two"])
+
+    def test_single_select_qmark(self):
+        self.create_test_table()
+        self.d.sql("INSERT INTO test VALUES (1, 'One'); "
+                   "INSERT INTO test VALUES (2, 'Two'); "
+                   "INSERT INTO test VALUES (3, 'Three');")
+        # Test execute single select, qmark
+        r = self.d.sql("SELECT * FROM test WHERE id > ?", (2,))
+        self.assertTrue(r["name"].tolist() == ["Three"])
+
+    def test_single_select_named(self):
+        self.create_test_table()
+        self.d.sql("INSERT INTO test VALUES (1, 'One'); "
+                   "INSERT INTO test VALUES (2, 'Two'); "
+                   "INSERT INTO test VALUES (3, 'Three');")
+        # Test execute single select, named
+        r = self.d.sql("SELECT * FROM test WHERE id > :id", {"id": 2})
+        self.assertTrue(r["name"].tolist() == ["Three"])
+
+    def test_single_select_handlebars(self):
+        self.create_test_table()
+        self.d.sql("INSERT INTO test VALUES (1, 'One'); "
+                   "INSERT INTO test VALUES (2, 'Two'); "
+                   "INSERT INTO test VALUES (3, 'Three');")
+        # Test execute single select, handlebars
+        r = self.d.sql("SELECT * FROM test WHERE id > {{id}}", {"id": 2})
+        self.assertTrue(r["name"].tolist() == ["Three"])
+
+    def test_pragma(self):
+        self.create_test_table()
+        # Test pragma
+        self.assertTrue(not self.d.sql("PRAGMA table_info('test');").empty)
 
 
 class TestDatabaseURLs(unittest.TestCase):

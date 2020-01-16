@@ -272,7 +272,7 @@ class SpatiaLiteDB(SQLiteDB):
     def sql(self, q, data=None, union=True, limit=None):
         """"""
         # Execute the query using the sql method of the super class
-        df = super(SpatiaLiteDB, self).sql(q, data, union, limit)
+        df = super(SpatiaLiteDB, self).sql(q, data)  # TODO: , union, limit)
         if df.empty:
             return df
 
