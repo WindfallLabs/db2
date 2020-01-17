@@ -7,6 +7,7 @@ import os
 import re
 import sys
 from collections import OrderedDict
+from decimal import Decimal
 from sqlite3 import Row
 
 try:
@@ -17,6 +18,7 @@ except ImportError:
 import pandas as pd
 import pybars
 import sqlparse
+from pymssql import OperationalError
 from sqlalchemy import create_engine
 from sqlalchemy.event import listen
 from sqlalchemy.exc import ResourceClosedError
@@ -273,22 +275,20 @@ class DB(object):
                 runtime.
             """
             dfs = []
-            # Sloppy, but functional
-            try:
-                return pd.read_sql(sql, d.con)
-            except:
-                pass
-            for stmt in sqlparse.parse(sql):
+            parsed = sqlparse.parse(sql)
+
+            for stmt in parsed:
                 dfs.append(func(d, stmt.value, data))
             return pd.concat(dfs).reset_index(drop=True)
         return sql_wrapper
 
     @_concat_dfs
     def sql(self, sql, data=None):
+        cur = self.dbapi_con.cursor()
         # Apply handlebars to single statement
         if isinstance(data, dict) and "{{" in sql:
             sql = self._apply_handlebars(sql, data)
-            cursor = self.cur.execute(sql)
+            cur.execute(sql)
         # Use placeholders/variables
         elif data is not None:
             # Execute many (iterate SQL over input data)
@@ -297,44 +297,42 @@ class DB(object):
                 for dat in data:
                     # Iteratively apply handlebars to statement
                     if "{{" in sql:
-                        self.cur.execute(self._apply_handlebars(sql, dat))
+                        cur.execute(
+                            self._apply_handlebars(sql, dat))
                     else:
-                        self.cur.execute(sql, dat)
-                return pd.DataFrame([[sql, len(data)]],
-                                      columns=["SQL", "Result"])
+                        cur.execute(sql, dat)
             # Execute single with placeholders/variables
             else:
-                cursor = self.cur.execute(sql, data)
+                cur.execute(sql, data)
         else:
             # Execute single statement without placeholders/variables
-            cursor = self.cur.execute(sql)
+            cur.execute(sql)
 
         try:
             # Get column names from cursor
-            columns = [i[0] for i in cursor.description]
-        except TypeError:
+            columns = [i[0] for i in cur.description]
+        except (TypeError, AttributeError):
             # If the SQL doesn't return column names in the cursor.description
-            columns = ["SQL", "Result"]
-        except AttributeError:
-            # MSSQL: Cursor does not have description or fetchall()
             columns = ["SQL", "Result"]
 
         # Get the data
         try:
-            data = cursor.fetchall()
-        except AttributeError:
-            # MSSQL
-            data = None
+            data = cur.fetchall()
+        except OperationalError:
+            data = []
 
-        # Executed SQL did not return columns or data
-        if columns == ["SQL", "Result"] and data in ([], None):
-            data = [[sql, 1]]
-        # Executed SQL returned an empty table
-        elif columns != ["SQL", "Result"] and data in ([], None):
-            data = None
+        # Executed SQL did not return data
+        if data in ([], None):
+            # If columns weren't returned
+            if columns == ["SQL", "Result"]:
+                data = [[sql, 1]]
+            # SQL returned an empty table
+            else:
+                data = None
 
         if self._echo:
             print(sql)
+        cur.close()
         return pd.DataFrame(data, columns=columns)
 
     def execute_script_file(self, filename, data=None):
@@ -360,6 +358,14 @@ class DB(object):
         Loads a DataFrame as a database table.
         """
         # TODO: enforce datatypes and column name requirements
+        if self.dbtype == "sqlite":
+            # Convert datetimes to string
+            df = df.apply(lambda x: x.astype(str)
+                          if str(x.dtype).startswith("date") else x)
+        # SQLAlchemy doesn't seem to like decimal.Decimal types
+        df = df.apply(lambda x: pd.to_numeric(x) if any(
+            set(x.apply(lambda x: isinstance(x, Decimal)))) else x)
+
         df.to_sql(table_name, self.engine)
         return
 
