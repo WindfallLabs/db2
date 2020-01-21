@@ -457,6 +457,15 @@ class SQLiteDB(DB):
             inplace=True)
         return self.cur.fetchall()
 
+    def create_table_as(self, table_name, sql):  # TODO: WIP
+        """
+        Handles 'CREATE TABLE {{table_name}} AS {{select_statement}}' via
+        pandas to preserve column type affinity.
+        """
+        df = self.sql(sql)
+        self.load_dataframe(df, table_name)
+        return
+
     def __str__(self):
         return "SQLite[SQLite] > {dbname}".format(dbname=self.dbname)
 
