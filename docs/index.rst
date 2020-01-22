@@ -1,4 +1,4 @@
-Welcome to db2's documentation!
+db2 - User-friendly, database objects
 ======================================
 
 .. toctree::
@@ -8,7 +8,7 @@ Welcome to db2's documentation!
    readme
    installation
    usage
-   modules
+   reference
    contributing
    authors
    history
