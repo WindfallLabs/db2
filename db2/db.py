@@ -297,8 +297,8 @@ class DB(object):
                 for dat in data:
                     # Iteratively apply handlebars to statement
                     if "{{" in sql:
-                        cur.execute(
-                            self._apply_handlebars(sql, dat))
+                        s = self._apply_handlebars(sql, dat)  # TODO: log SQL
+                        cur.execute(s)
                     else:
                         cur.execute(sql, dat)
             # Execute single with placeholders/variables
@@ -353,10 +353,11 @@ class DB(object):
             script = self._apply_handlebars(f.read(), data)
         return self.sql(script, data)
 
-    def load_dataframe(self, df, table_name):
+    def load_dataframe(self, df, table_name, **kwargs):
         """
         Loads a DataFrame as a database table.
         """
+        kwargs.setdefault("index", False)
         # TODO: enforce datatypes and column name requirements
         if self.dbtype == "sqlite":
             # Convert datetimes to string
@@ -366,7 +367,7 @@ class DB(object):
         df = df.apply(lambda x: pd.to_numeric(x) if any(
             set(x.apply(lambda x: isinstance(x, Decimal)))) else x)
 
-        df.to_sql(table_name, self.engine)
+        df.to_sql(table_name, self.engine, **kwargs)
         return
 
     def create_mapping(self, mapping):
@@ -457,7 +458,7 @@ class SQLiteDB(DB):
             inplace=True)
         return self.cur.fetchall()
 
-    def create_table_as(self, table_name, sql):  # TODO: WIP
+    def create_table_as(self, table_name, sql, **kwargs):  # TODO: add tests
         """
         Handles 'CREATE TABLE {{table_name}} AS {{select_statement}}' via
         pandas to preserve column type affinity.

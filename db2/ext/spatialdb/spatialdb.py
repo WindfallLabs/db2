@@ -144,7 +144,9 @@ class SpatiaLiteDB(SQLiteDB):
         ----------
 
         gdf: pandas.GeoDataFrame
-            GeoDataFrame to load into database as a spatial table.
+            GeoDataFrame to load into database as a spatial table. This could
+            also be a normal DataFrame with geometry stored as Well-Known Text
+            in a Series called 'wkt'.
         table_name: str
             The name of the table to create from the gdf
         srid: int
@@ -164,9 +166,21 @@ class SpatiaLiteDB(SQLiteDB):
             Note that the 'index' argument is set to False.
         """
         # TODO: check_security()
+        rcols = ["SQL", "Result"]
+        r = pd.DataFrame(columns=rcols)
         # Get SRID if needed
         if not self.has_srid(srid):
             self.get_spatial_ref_sys(srid, srid_auth)
+            r = r.append(
+                pd.DataFrame([["get_spatial_ref_sys", 1]], columns=rcols))
+        # Auto-convert Well-Known Text to shapely
+        if "geometry" not in gdf.columns and "wkt" in gdf.columns:
+            # Load geometry from WKT series
+            gdf["geometry"] = gpd.GeoSeries(gdf["wkt"].apply(
+                shapely.wkt.loads))
+            # Drop wkt series
+            gdf = gpd.GeoDataFrame(gdf.drop("wkt", axis=1))
+            r = r.append(pd.DataFrame([["wkt.loads", 1]], columns=rcols))
         # Get geometry type from 'geometry' column
         geom_types = set(gdf["geometry"].geom_type)
         # SpatiaLite can only accept one geometry type
@@ -174,25 +188,38 @@ class SpatiaLiteDB(SQLiteDB):
             # Cast geometries to Multi-type
             gdf["geometry"] = gdf["geometry"].apply(
                 lambda x: gpd.tools.collect(x, True))
+            r = r.append(pd.DataFrame([["collect()", 1]], columns=rcols))
         geom_type = max(geom_types, key=len).upper()
         # Convert geometry to WKT
         gdf["geometry"] = gdf["geometry"].apply(lambda x: x.wkt)
         # Load the table using pandas
-        kwargs.setdefault("index", False)
         gdf.to_sql(table_name, self.dbapi_con, **kwargs)
         # Convert from WKT to SpatiaLite geometry
-        self.sql("UPDATE {{tbl}} "
-                 "SET geometry = GeomFromText(geometry, {{srid}});",
-                 data={"tbl": table_name, "srid": srid})
+        r = r.append(self.sql(
+            "UPDATE {{tbl}} SET geometry = GeomFromText(geometry, {{srid}});",
+            data={"tbl": table_name, "srid": srid})
+            )
+
         # Recover geometry as a spatial column
         self.sql("SELECT RecoverGeometryColumn(?, ?, ?, ?);",
                  (table_name, "geometry", srid, geom_type))
+        if table_name not in self.geometries["f_table_name"].tolist():
+            r = r.append(
+                pd.DataFrame([["RecoverGeometryColumn", 0]], columns=rcols))
+        else:
+            r = r.append(
+                pd.DataFrame([["RecoverGeometryColumn", 1]], columns=rcols))
+        # Optionally validate geometries
         if validate:
-            self.sql("UPDATE {{tbl}} "
-                     "SET geometry = MakeValid(geometry) "
-                     "WHERE NOT IsValid(geometry);",
-                     data={"tbl": table_name})
-        return pd.DataFrame([["Load GDF", len(gdf)]], columns=["SQL", "Result"])
+            r = r.append(self.sql("UPDATE {{tbl}} "
+                                  "SET geometry = MakeValid(geometry) "
+                                  "WHERE NOT IsValid(geometry);",
+                                  data={"tbl": table_name}))
+        self.dbapi_con.commit()  # NOTE: this is here to prevent overwrite bug
+        # where geometry tables disappear when a new one is loaded
+        r = r.append(
+            pd.DataFrame([["Load GeoDataFrame", len(gdf)]], columns=rcols))
+        return r.reset_index(drop=True)
 
     def import_shp(self, filename, table_name, charset="UTF-8", srid=-1,
                    geom_column="geometry", pk_column="PK",
@@ -307,6 +334,16 @@ class SpatiaLiteDB(SQLiteDB):
             else:
                 df.crs = fiona.crs.from_epsg(srid)
         return df
+
+    def create_table_as(self, table_name, sql, srid=None, **kwargs):  # TODO: add tests
+        """
+        Handles 'CREATE TABLE {{table_name}} AS {{select_statement}}' via
+        pandas to preserve column type affinity.
+        """
+        df = self.sql(sql)
+        if srid is not None:  # "geometry" in df.columns or "wkt" in df.columns:
+            return self.load_geodataframe(df, table_name, srid)
+        return self.load_dataframe(df, table_name)
 
     @property
     def geometries(self):
