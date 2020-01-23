@@ -1,20 +1,39 @@
-db2 - User-friendly, database objects
-======================================
+db2.py - User-friendly, database objects
+========================================
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :hidden:
 
    readme
    installation
-   usage
+   getting-started
+   examples
    reference
    contributing
    authors
-   history
+   changes
+   
+.. include:: ../README.rst
 
 Indices and tables
 ==================
 * :ref:`genindex`
 * :ref:`modindex`
 * :ref:`search`
+
+Credits
+-------
+
+This package was created with Cookiecutter_ and the `audreyr/cookiecutter-pypackage`_ project template.  
+
+
+And many thanks to the folks who made this project possible! This includes, but is not limited to:
+
+* Greg Lamp / yhat
+* Wes McKinney & The PyData Development Team
+* GeoPandas contributors
+
+
+.. _Cookiecutter: https://github.com/audreyr/cookiecutter
+.. _`audreyr/cookiecutter-pypackage`: https://github.com/audreyr/cookiecutter-pypackage

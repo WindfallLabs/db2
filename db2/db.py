@@ -1,6 +1,6 @@
 # !/usr/bin/env python2
 """
-db module
+This module contains the DB superclass and all related subclasses.
 """
 
 import os
@@ -41,45 +41,44 @@ pd.set_option("display.float_format", "{:20,.6f}".format)
 
 class DB(object):
     """
-    Utility for exploring and querying a database.
-    Adapted from code originally written by yhat for use with SQLAlchemy.
+    Utility for exploring and querying a database. Cheers yhat / Greg Lamp!
+
+    Parameters
+    ----------
+    url: str
+        The URL used to connect to the database
+    username: str
+        Your username for the database
+    password: str
+        Your password for the database
+    hostname: str
+        Hostname your database is running on
+        (i.e. "localhost", "10.20.1.248")
+    port: int
+        Port number that the database is running on
+
+            * postgres: 5432
+            * redshift: 5439
+            * mysql: 3306
+            * sqlite: n/a
+            * mssql: 1433
+    dbname: str
+        Name of the database or path to SQLite database
+    dbtype: str
+        Type of database (i.e. dialect)
+    driver: str, None
+        Driver for mssql/pyodbc connections.
+    encoding: str
+        Specify the encoding.
+    echo: bool
+        Whether or not to repeat queries and messages back to user
+    extensions: list
+        List of SQLite extensions to load on connection
     """
     def __init__(self, url=None, username=None, password=None, hostname=None,
                  port=None, dbname=None, dbtype=None, driver=None,
                  encoding="utf8", echo=False, extensions=[]):
-        """
 
-        Parameters
-        ----------
-        url: str
-            The DB-API URL string used to connect to the database
-        username: str
-            Your username for the database
-        password: str
-            Your password for the database
-        hostname: str
-            Hostname your database is running on
-            (i.e. "localhost", "10.20.1.248")
-        port: int
-            Port the database is running on. defaults to default port for db.
-                postgres: 5432
-                redshift: 5439
-                mysql: 3306
-                sqlite: n/a
-                mssql: 1433
-        dbname: str
-            Name of the database or path to sqlite database
-        dbtype: str
-            Type of database (i.e. dialect)
-        driver: str, None
-            Driver for mssql/pyodbc connections.
-        encoding: str
-            Specify the encoding.
-        echo: bool
-            Whether or not to repeat queries and messages back to user
-        extensions: list
-            List of extensions to load on connection
-        """
         self._encoding = encoding
         # Credentials
         # TODO: copy over db.py's utils.py and implement profiles
@@ -157,22 +156,34 @@ class DB(object):
 
     @property
     def dbname(self):
+        """
+        Returns the database name.
+        """
         return self.credentials["dbname"]
 
     @property
     def dbtype(self):
+        """
+        Returns the type of database.
+        """
         return self.credentials["dbtype"]
 
     @property
     def table_names(self):
         """
-        A list of tables in the database (alias for self.engine.table_names())
+        Alias for ``self.engine.table_names()``
+        Returns a list of tables in the database.
         """
         return self.engine.table_names()
 
     def get_table_mapping(self, table_name):
         """
         Return an existing table as a mapping
+
+        Parameters
+        ----------
+        table_name: str
+            The name of the table to get as an SQLAlchemy mapping.
 
         Example
         -------
@@ -201,10 +212,19 @@ class DB(object):
         """
         return ["\?", "\:\w+"]  # Default for SQLite (?, and :var style)
 
-
     def _apply_handlebars(self, sql, data, union=True):
         """
         Create queries using Handlebars style templates
+
+        Parameters
+        ----------
+        sql: str
+            SQL statement
+        data: dict, list of dicts
+            Variables to iterate the SQL statement over
+
+        Returns
+        Modified SQL string.
 
         Example
         -------
@@ -241,6 +261,27 @@ class DB(object):
     @staticmethod
     def clean_sql(sql, rm_comments=True, rm_blanks=True,
                   rm_indents=False, **kwargs):
+        """
+        Cleaning utility (WIP).
+
+        Parameters
+        ----------
+        sql: str
+            SQL statement(s)
+        rm_comments: bool
+            Optinally remove comments from SQL statement(s)
+        rm_blanks: bool
+            Optinally remove blank lines from SQL statement(s)
+        rm_indents: bool
+            Optinally remove indents from SQL statement(s)
+        kwargs: dict
+            Passed to ``sqlparse.format``
+
+        Returns
+        -------
+        str:
+            The cleaned SQL statement(s).
+        """
         # Remove comments
         if rm_comments:
             # Get anything before -- comments
@@ -260,19 +301,23 @@ class DB(object):
         """Decorates DB.sql()."""
         def sql_wrapper(d, sql, data=None):
             """
-            Executes one or more SQL statements and returns a DataFrame of the
-            results.
+            Executes one or more SQL statements.
 
             Parameters
             ----------
-            d: database object (handled by self)
             sql: str
                 The SQL to be executed. May be a single statement/query or
                 script of multiple statements. Placeholders are allowed
-                (varies by dbtype).
-            data: a dict or tuple; or, a list or tuple of tuples or dicts.
+                (may vary by dbtype).
+            data: dict, tuple; or list or tuple of tuples or dicts
                 A container of variables to pass to placeholders in the SQL at
                 runtime.
+
+            Returns
+            -------
+            DataFrame:
+                A DataFrame containing the results of a SELECT query, or an
+                echo of the statement and number of successful operations.
             """
             dfs = []
             parsed = sqlparse.parse(sql)
@@ -346,6 +391,11 @@ class DB(object):
             Path to the file containing SQL to be executed.
         data: dict
             Dictionary mapping script variables to values via PyBars.
+
+        Returns
+        -------
+        DataFrame:
+            The DataFrame produced from executing the SQL statement(s).
         """
         if not os.path.exists(filename):
             raise AttributeError("input file not found")
@@ -355,7 +405,21 @@ class DB(object):
 
     def load_dataframe(self, df, table_name, **kwargs):
         """
-        Loads a DataFrame as a database table.
+        Loads a DataFrame as a database table. (WIP)
+
+        More than just a pass-through to ``DataFrame.to_sql()``, this method
+        can be used to ensure that data conforms to various rules. For
+        instance, users may specify that all column names should be lowercase,
+        etc.
+
+        Parameters
+        ----------
+        df: DataFrame
+            DataFrame object to load into database as a table
+        table_name: str
+            Name of table to create
+        **kwargs: dict
+            Passed to ``df.to_sql()``
         """
         kwargs.setdefault("index", False)
         # TODO: enforce datatypes and column name requirements
@@ -376,6 +440,7 @@ class DB(object):
         return
 
     def close(self):
+        """Close the database connection."""
         self.con.close()
         self.engine.dispose()
         return
@@ -434,7 +499,18 @@ class SQLiteDB(DB):
 
     def attach_db(self, db_path, name=None):
         """
-        Attaches a database with `ATTACH DATABASE :file AS :name;`.
+        Attaches a database with ``ATTACH DATABASE :file AS :name;``.
+
+        Parameters
+        ----------
+        db_path: str
+            Path to database to be attached
+        name: str default: None
+            Name or alias of the attached database
+
+        Returns
+        -------
+        The fetched cursor result.
         """
         # Default name to filename
         if name is None:
@@ -448,7 +524,7 @@ class SQLiteDB(DB):
 
     def detach_db(self, name):
         """
-        Detaches an attached database with  `DETACH DATABASE :name;`.
+        Detaches an attached database by name via ``DETACH DATABASE :name;``.
         """
         self.cur.execute("DETACH DATABASE :name;", {"name": name})
 
@@ -460,8 +536,19 @@ class SQLiteDB(DB):
 
     def create_table_as(self, table_name, sql, **kwargs):  # TODO: add tests
         """
-        Handles 'CREATE TABLE {{table_name}} AS {{select_statement}}' via
-        pandas to preserve column type affinity.
+        Handles ``CREATE TABLE {{table_name}} AS {{select_statement}};`` via
+        pandas to preserve column type affinity. (WIP)
+
+        Parameters
+        ----------
+        table_name: str
+            Name of table to create
+        sql: str
+            SQL `SELECT` statement used to create a new table
+
+        Returns
+        -------
+        None
         """
         df = self.sql(sql)
         self.load_dataframe(df, table_name)
@@ -472,6 +559,9 @@ class SQLiteDB(DB):
 
 
 class PostgresDB(DB):
+    """
+    Utility for exploring and querying a PostgreSQL database. (WIP)
+    """
     def __init__(self, username, password, hostname, dbname, dbtype="postgres",
                  port=5432, schemas=None, profile="default", echo=False,
                  exclude_system_tables=True, limit=1000, keys_per_column=None,
@@ -488,7 +578,7 @@ class PostgresDB(DB):
 
 class MSSQLDB(DB):
     """
-    Utility for exploring and querying a Microsoft SQL database.
+    Utility for exploring and querying a Microsoft SQL database. (WIP)
     """
     def __init__(self, username, password, hostname, dbname, port=1433,
                  driver='pymssql', echo=False):

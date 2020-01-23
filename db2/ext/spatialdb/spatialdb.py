@@ -40,6 +40,9 @@ GEOM_TYPES = {
     6: "MULTIPOLYGON"
     }
 
+# TODO: something that allows users the option to raise errors on column names
+# that are greater than 10 chars long
+
 
 class _SpatiaLiteSecurity(object):
     """
@@ -86,21 +89,26 @@ SPATIALITE_SECURITY = _SpatiaLiteSecurity()
 class SpatiaLiteError(Exception):
     """
     An explicit exception for use when SpatiaLite doesn't work as expected.
-
-    Example:
-    # This exemption is useful when the environment variable
-    # 'SPATIALITE_SECURITY' is required to be set to 'relaxed' but isn't.
-    # Functions such as ImportSHP will just not run, and users might beat their
-    # head against the wall wondering why their data doesn't exist.
     """
     pass
 
 
 def check_security():
-    """Raises a SpatiaLiteError when not set to 'relaxed'."""
+    """
+    Raises a SpatiaLiteError when SPATIALITE_SECURITY environment variable is
+    not set to 'relaxed'.
+
+    Without raising an error, SpatiaLite doesn't provide some functions such as
+    ImportSHP.
+
+    Returns
+    -------
+    None
+    """
     if not os.environ["SPATIALITE_SECURITY"] == "relaxed":
         raise SpatiaLiteError(
             "SPATIALITE_SECURITY variable not set to 'relaxed'")
+    return
 
 
 class SpatiaLiteDB(SQLiteDB):
@@ -109,7 +117,7 @@ class SpatiaLiteDB(SQLiteDB):
 
     Parameters
     ----------
-    filename: str
+    dbname: str
         Path to SQLite database or ":memory:" for in-memory database
     echo: bool
         Whether or not to repeat queries and messages back to user
@@ -130,7 +138,19 @@ class SpatiaLiteDB(SQLiteDB):
         self.spatialite_security = "relaxed"  # TODO: State?
 
     def has_srid(self, srid):
-        """Check if a spatial reference system is in the database."""
+        """
+        Check if a spatial reference system is in the database.
+
+        Parameters
+        ----------
+        srid: int
+            Spatial Reference ID
+
+        Returns
+        -------
+        bool
+            True if the SRID exists in spatial_ref_sys table, otherwise False.
+        """
         return len(self.engine.execute(
             "SELECT * FROM spatial_ref_sys WHERE srid=?", (srid,)
             ).fetchall()) == 1
@@ -151,13 +171,14 @@ class SpatiaLiteDB(SQLiteDB):
             The name of the table to create from the gdf
         srid: int
             Spatial Reference ID for the geometry
-
-        if_exists: {'fail', 'replace', 'append'}, default 'fail'
+        if_exists: str ({'fail', 'replace', 'append'}, default 'fail')
             How to behave if the table already exists.
-                fail: Raise a ValueError.
-                replace: Drop the table before inserting new values.
-                append: Insert new values to the existing table.
-        srid_auth: {'epsg', 'sr-org', 'esri'}, default 'esri'
+
+                * fail: Raise a ValueError.
+                * replace: Drop the table before inserting new values.
+                * append: Insert new values to the existing table.
+
+        srid_auth: str ({'epsg', 'sr-org', 'esri'}, default 'esri')
             If the 'srid' argument value is not in the database, it is
             retrieved from the web. This argument allows users to specify the
             spatial reference authority. Default is 'esri' since most
@@ -223,15 +244,53 @@ class SpatiaLiteDB(SQLiteDB):
 
     def import_shp(self, filename, table_name, charset="UTF-8", srid=-1,
                    geom_column="geometry", pk_column="PK",
-                   geometry_type="AUTO", coerce2D=0, compressed=0,
+                   geom_type="AUTO", coerce2D=0, compressed=0,
                    spatial_index=0, text_dates=0):
         """
-        Import a shapefile using the SpatiaLite function ImportSHP.
-        Faster than 'load_geodataframe' but much more sensitive to data errors.
+        Will import an external Shapfile into an internal Table.
+
+        This method wraps SpatiaLite's ImportSHP function. It is faster than
+        ``load_geodataframe`` but more sensitive. For more information check
+        the `SpatiaLite's Functions Reference List`_.
 
         Parameters
         ----------
+        filename: str
+            Absolute or relative path leading to the Shapefile (omitting any
+            .shp, .shx or .dbf suffix).
+        table_name: str
+            Name of the table to be created.
+        charset: str
+            The character encoding adopted by the DBF member, as
+            e.g. UTF-8 or CP1252
+        srid: int
+            EPSG SRID value; -1 by default.
+        geom_column: str
+            Name to assign to the Geometry column; 'geometry' by default.
+        pk_column: str
+            Name of a DBF column to be used in the Primary Key role; an
+            INTEGER AUTOINCREMENT PK will be created by default.
+        geom_type: str
+            One between: AUTO, POINT|Z|M|ZM, LINESTRING|Z|M|ZM, POLYGON|Z|M|ZM,
+            MULTIPOINT|Z|M|ZM, LINESTRING|Z|M|ZM, MULTIPOLYGON|Z|M|ZM; by
+            default AUTO.
+        coerce2D: int {0, 1}
+            Cast to 2D or not; 0 by default.
+        compressed: int {0, 1}
+            Compressed geometries or not; 0 by default.
+        spatial_index: int {0, 1}
+            Immediately building a Spatial Index or not; 0 by default.
+        text_dates: int {0, 1}
+            Interpret DBF dates as plaintext or not: 0 by default
+            (i.e. as Julian Day).
 
+        Returns
+        -------
+        DataFrame:
+            DataFrame containing SQL passed and number of inserted features.
+
+
+        .. _`SpatiaLite's Functions Reference List`: https://www.gaia-gis.it/gaia-sins/spatialite-sql-4.3.0.html
         """
         # Validate parameters
         check_security()
@@ -244,18 +303,46 @@ class SpatiaLiteDB(SQLiteDB):
         df = self.sql(
             "SELECT ImportSHP(?,?,?,?,?,?,?,?,?,?,?);",
             (filename, table_name, charset, srid, geom_column, pk_column,
-             geometry_type, coerce2D, compressed, spatial_index, text_dates))
+             geom_type, coerce2D, compressed, spatial_index, text_dates))
         if table_name not in self.table_names:
             # TODO: Hopefully this can someday be more helpful
             raise SpatiaLiteError("import failed")
         return df
 
     def export_shp(self, table_name, filename, geom_column="geometry",
-                   charset="UTF-8", geometry_type="AUTO"):
+                   charset="UTF-8", geom_type="AUTO"):
         """
-        Export a shapefile using the SpatiaLite function ExportSHP.
-        Note that parameters have been altered to improve functionality and
-        make consistent with ImportSHP.
+        Will export an internal Table as an external Shapefile.
+
+        This method wraps SpatiaLite's ExportSHP function. Note that this
+        function's parameters differ from
+        `SpatiaLite's Functions Reference List`_ in order to improve
+        functionality and make more consistent with ImportSHP's parameters.
+
+        Parameters
+        ----------
+        table_name: str
+            Name of the table to be exported.
+        filename: str
+            Absolute or relative path leading to the Shapefile (omitting any
+            .shp, .shx or .dbf suffix).
+        geom_column: str
+            Name of the Geometry column. Default 'geometry'
+        charset: str
+            The character encoding adopted by the DBF member, as
+            e.g. UTF-8 or CP1252
+        geom_type: str
+            Useful when exporting unregistered Geometries, and can be one
+            between: POINT, LINESTRING, POLYGON or MULTIPOINT; AUTO option
+            queries the database.
+
+        Returns
+        -------
+        DataFrame:
+            DataFrame containing the results of executing the SQL. (WIP)
+
+
+        .. _`SpatiaLite's Functions Reference List`: https://www.gaia-gis.it/gaia-sins/spatialite-sql-4.3.0.html
         """
         # Validate parameters
         check_security()
@@ -263,17 +350,17 @@ class SpatiaLiteDB(SQLiteDB):
             raise AttributeError("table '{}' not found".format(table_name))
         filename = os.path.splitext(filename)[0].replace("\\", "/")
         geom_data = self.get_geometry_data(table_name)
-        if geometry_type == "AUTO":
-            geometry_type = GEOM_TYPES[geom_data["geometry_type"]]
+        if geom_type == "AUTO":
+            geom_type = GEOM_TYPES[geom_data["geometry_type"]]
         # Execute
         df = self.sql(
-            "SELECT ImportSHP(?,?,?,?);",
+            "SELECT ExportSHP(?,?,?,?);",
             # ExportSHP parameter order
             (table_name, geom_column, filename, charset)) #, geometry_type))
         if not os.path.exists(filename + ".shp"):
             # TODO: Hopefully this can someday be more helpful
             raise SpatiaLiteError("export failed")
-        return df  # TODO: WIP not working
+        return df
 
 
     def get_spatial_ref_sys(self, srid, auth="esri"):
@@ -337,8 +424,22 @@ class SpatiaLiteDB(SQLiteDB):
 
     def create_table_as(self, table_name, sql, srid=None, **kwargs):  # TODO: add tests
         """
-        Handles 'CREATE TABLE {{table_name}} AS {{select_statement}}' via
-        pandas to preserve column type affinity.
+        Handles ``CREATE TABLE {{table_name}} AS {{select_statement}};`` via
+        pandas to preserve column type affinity. (WIP)
+
+        Parameters
+        ----------
+        table_name: str
+            Name of table to create
+        sql: str
+            SQL `SELECT` statement used to create a new
+        srid: int
+            Spatial Reference ID if the resulting table should be spatial
+
+        Returns
+        -------
+        None
+            (WIP)
         """
         df = self.sql(sql)
         if srid is not None:  # "geometry" in df.columns or "wkt" in df.columns:
@@ -347,13 +448,17 @@ class SpatiaLiteDB(SQLiteDB):
 
     @property
     def geometries(self):
-        """Return the contents of table `geometry_columns` and srs info."""
+        """
+        Returns a dictionary containing the ``geometry_columns`` table joined
+        with related records in the ``spatial_ref_sys`` table.
+        """
         return self.sql(
             ("SELECT * FROM geometry_columns g "
              "LEFT JOIN spatial_ref_sys s "
              "ON g.srid=s.srid"))
 
     def get_geometry_data(self, table_name):
+        """(WIP)."""
         return self.geometries[self.geometries["f_table_name"] == table_name
                                ].iloc[0].to_dict()
 

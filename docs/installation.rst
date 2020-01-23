@@ -8,44 +8,41 @@ Installation
 Stable release
 --------------
 
-To install db2, run this command in your terminal:
+No stable release exists on PyPI yet. Stay tuned!  
 
-.. code-block:: console
-
-    $ pip install db2
-
-This is the preferred method to install db2, as it will always install the most recent stable release.
-
-If you don't have `pip`_ installed, this `Python installation guide`_ can guide
-you through the process.
-
-.. _pip: https://pip.pypa.io
-.. _Python installation guide: http://docs.python-guide.org/en/latest/starting/installation/
-
+However, we would love if you beta tested our source code! (see below)
 
 From sources
 ------------
 
-The sources for db2 can be downloaded from the `Github repo`_.
+**NOTE** that in this early version (v0.0.1), the install process and REQUIREMENTS have not been completely ironed out.  
 
-You can either clone the public repository:
+We recommend seting up a virtual envrionment before installing db2. This can be done with:
+
+.. code-block:: console
+
+    $ virtualenv db2_env
+
+Then download the sources for db2 from the `Github repo`_.
+
+You can clone the public repository using:
 
 .. code-block:: console
 
     $ git clone git://github.com/WindfallLabs/db2
 
-Or download the `tarball`_:
+and install it in the virtual environment with:
 
 .. code-block:: console
 
-    $ curl -OJL https://github.com/WindfallLabs/db2/tarball/master
-
-Once you have a copy of the source, you can install it with:
-
-.. code-block:: console
-
+    $ cd db2
+    $ source ../db2_env/Scripts/activate
     $ python setup.py install
+
+Now check the next page for how to get started using db2!
+
+Or contribute_!
 
 
 .. _Github repo: https://github.com/WindfallLabs/db2
-.. _tarball: https://github.com/WindfallLabs/db2/tarball/master
+.. _contribute: Contributing.html#get-started
