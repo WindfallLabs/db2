@@ -401,7 +401,7 @@ class DB(object):
             raise AttributeError("input file not found")
         with open(filename, "r") as f:
             script = self._apply_handlebars(f.read(), data)
-        return self.sql(script, data)
+        return self.sql(script)
 
     def load_dataframe(self, df, table_name, **kwargs):
         """

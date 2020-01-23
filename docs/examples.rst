@@ -1,21 +1,25 @@
-========
-Examples
-========
+==================
+SpatialDB Examples
+==================
 
-.. codeblock: Python
+This section shows examples that use the spatialdb extension::
+
     """
     This example connects to a Microsoft SQL Server database (with ESRI SDE)
-    and copies data into an in-memory SpatiaLite database.
+    and copies data into an in-memory SpatiaLite database in order to find
+    parcels that could be zoned to a higher zoning district as allowed by
+    land use.
     
-    Data used is zoning and land use data for the City of Missoula, MT
+    Data used is zoning, land use, and parcel data for the City of Missoula, MT
     """
+    from db2 import MSSQLDB
     from db2.ext.spatialdb import SpatiaLiteDB
 
-    # SpatiaLite
-    d = SpatiaLiteDB(":memory:", echo=True)
+    # Create in-memory SpatiaLite database
+    d = SpatiaLiteDB(":memory:")
     
-    # MS SQL
-    gisrep = db2.MSSQLDB("dbread", "dbread", r"SQLA\GIS", "gisrep")
+    # Connect to MS SQL database "gisrep" on SQLA\GIS server
+    gisrep = MSSQLDB("dbread", "dbread", r"SQLA\GIS", "gisrep")
 
     # Query Zoning data
     zoning = gisrep.sql("SELECT "
@@ -83,5 +87,8 @@ Examples
               "    AND wkt IS NOT NULL;")
 
     # Create a new table 'underzoned_parcels' using the 'joined' query
+    # NOTE: this takes a bit of time...
     d.create_table_as("underzoned_parcels", joined, 102700)
 
+    # Export table as a shapefile
+    d.export_shp("underzoned_parcels", "C:/workspace/underzoned_parcels")
