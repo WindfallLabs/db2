@@ -341,11 +341,11 @@ class DB(object):
 
     @_concat_dfs
     def sql(self, sql, data=None):
-        cur = self.dbapi_con.cursor()
+        #cur = self.dbapi_con.cursor()
         # Apply handlebars to single statement
         if isinstance(data, dict) and "{{" in sql:
             sql = self._apply_handlebars(sql, data)
-            cur.execute(sql)
+            self.cur.execute(sql)
         # Use placeholders/variables
         elif data is not None:
             # Execute many (iterate SQL over input data)
@@ -355,26 +355,26 @@ class DB(object):
                     # Iteratively apply handlebars to statement
                     if "{{" in sql:
                         s = self._apply_handlebars(sql, dat)  # TODO: log SQL
-                        cur.execute(s)
+                        self.cur.execute(s)
                     else:
-                        cur.execute(sql, dat)
+                        self.cur.execute(sql, dat)
             # Execute single with placeholders/variables
             else:
-                cur.execute(sql, data)
+                self.cur.execute(sql, data)
         else:
             # Execute single statement without placeholders/variables
-            cur.execute(sql)
+            self.cur.execute(sql)
 
         try:
             # Get column names from cursor
-            columns = [i[0] for i in cur.description]
+            columns = [i[0] for i in self.cur.description]
         except (TypeError, AttributeError):
             # If the SQL doesn't return column names in the cursor.description
             columns = ["SQL", "Result"]
 
         # Get the data
         try:
-            data = cur.fetchall()
+            data = self.cur.fetchall()
         except OperationalError:
             data = []
 
@@ -389,7 +389,6 @@ class DB(object):
 
         if self._echo:
             print(sql)
-        cur.close()
         return pd.DataFrame(data, columns=columns)
 
     def execute_script_file(self, filename, data=None):
@@ -450,12 +449,13 @@ class DB(object):
         """Creates a table from a mapping object."""
         mapping.__table__.create(self.engine)
         return
-
+    '''
     def close(self):
         """Close the database connection."""
         self.con.close()
         self.engine.dispose()
         return
+    '''
 
     def __del__(self):
         self.close()
