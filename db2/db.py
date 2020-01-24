@@ -25,6 +25,8 @@ from sqlalchemy.exc import ResourceClosedError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
+import utils
+
 
 __all__ = [
     "DB",
@@ -102,6 +104,7 @@ class DB(object):
 
         # Create engine
         self.engine = create_engine(self._url)
+        self.dbapi_con = None  # Is set by listen
 
         # Get DBAPI connection and cursor objects on connect
         listen(self.engine, 'connect', self._on_connect)
@@ -297,7 +300,7 @@ class DB(object):
             sql = sqlparse.format(sql, **kwargs)
         return sql
 
-    def _concat_dfs(func):
+    def _concat_dfs(sqlfunc):
         """Decorates DB.sql()."""
         def sql_wrapper(d, sql, data=None):
             """
@@ -322,8 +325,17 @@ class DB(object):
             dfs = []
             parsed = sqlparse.parse(sql)
 
+            # Iterate over statements passed. Single statements that iterate
+            # over data (executemany) will occur inside the sqlfunc
             for stmt in parsed:
-                dfs.append(func(d, stmt.value, data))
+                dfs.append(sqlfunc(d, stmt.value, data))
+            # If a select query is in the tuple of parsed statements, we don't
+            # want to concat with a success DataFrame showing SQL and Result
+            try:
+                return dfs[parsed.index(
+                    [s for s in parsed if utils.is_query(s)][0])]
+            except IndexError:
+                pass
             return pd.concat(dfs).reset_index(drop=True)
         return sql_wrapper
 

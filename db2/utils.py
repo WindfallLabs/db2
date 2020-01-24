@@ -7,6 +7,7 @@ from dateutil.parser import parse as parse_date
 from decimal import Decimal
 
 import pandas as pd
+import sqlparse
 
 
 # =============================================================================
@@ -30,6 +31,29 @@ def decimals_to_floats(col):
         return pd.to_numeric(col)
     return col
 
+# =============================================================================
+# Parsed SQL Functions:
+# =============================================================================
+
+def is_query(parsed_sql):
+    """
+    Determine if the input SQL statement is a query.
+
+    Parameters
+    ----------
+    parsed_sql: sqlparse.sql.Statement
+        SQL statement that has been parsed with ``sqlparse.parse()``.
+
+    Returns
+    -------
+    bool
+        True if statement type is SELECT and the second non-whitespace token is
+        not a function.
+    """
+    tokens = [t for t in parsed_sql.tokens if not t.is_whitespace]
+    return parsed_sql.get_type() == u"SELECT" and not type(
+        tokens[0]).__name__ == "Function"
+
 
 # =============================================================================
 # SQL Functions:
@@ -37,9 +61,9 @@ def decimals_to_floats(col):
 
 def pystrftime(directive, timestring):
     """
-    Extends the built-in function 'strftime' with Python's datetime module.
-    This adds support for directives not natively supported in some SQL
-    flavors. For example, this function adds the following to SQLite:
+    Provides a ``strftime``-comparable SQL function that leverages Python's
+    datetime module. For example, this function adds support for the following
+    directives that SQLite's ``strftime()`` function does not:
 
     %A, %B, %I, %J, %U, %X, %Z, %a, %b, %c, %p, %s, %x, %y, %z
 

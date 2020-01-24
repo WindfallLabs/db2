@@ -315,9 +315,9 @@ class SpatiaLiteDB(SQLiteDB):
         Will export an internal Table as an external Shapefile.
 
         This method wraps SpatiaLite's ExportSHP function. Note that this
-        function's parameters differ from
+        function's parameters differ slightly from
         `SpatiaLite's Functions Reference List`_ in order to improve
-        functionality and make more consistent with ImportSHP's parameters.
+        functionality and make it more consistent with ImportSHP's parameters.
 
         Parameters
         ----------

@@ -71,11 +71,9 @@ class MainTests(unittest.TestCase):
 
     def test_sql(self):
         d = sdb.SpatiaLiteDB(":memory:")
-        gdf = gpd.read_file(WILDERNESS)
-        d.load_geodataframe(gdf, "wild", srid=4326)
-        df = d.sql("SELECT * FROM wild LIMIT 5")
-        self.assertEqual(len(df), 5)
-        self.assertTrue("geometry" in df.columns)
+        df = d.sql("SELECT * FROM spatial_ref_sys WHERE srid = 4326")
+        self.assertTrue(not df.empty and df["srid"].iat[0] == 4326)
+
 
 class ImportTests(unittest.TestCase):
     def setUp(self):
@@ -84,7 +82,7 @@ class ImportTests(unittest.TestCase):
     def test_load_geodataframe(self):
         d = sdb.SpatiaLiteDB(":memory:")
         gdf = gpd.read_file(WILDERNESS)
-        d.load_geodataframe(gdf, "wild", 4326)
+        d.load_geodataframe(gdf, "wild", 4326, validate=False)
         self.assertTrue("wild" in d.table_names)
         self.assertTrue("wild" in d.geometries["f_table_name"].tolist())
         self.assertEqual(
