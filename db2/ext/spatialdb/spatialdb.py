@@ -26,6 +26,8 @@ from sqlalchemy import func, select
 from db2 import SQLiteDB
 from ._utils import get_sr_from_web, SpatiaLiteBlobElement
 
+# Assume users want access to functions like ImportSHP, ExportSHP, etc.
+os.environ["SPATIALITE_SECURITY"] = "relaxed"
 
 if sys.platform.startswith("linux"):
     MOD_SPATIALITE = "/usr/local/lib/mod_spatialite.so"
@@ -44,71 +46,11 @@ GEOM_TYPES = {
 # that are greater than 10 chars long
 
 
-class _SpatiaLiteSecurity(object):
-    """
-    Object for locally handling the SPATIALITE_SECURITY environment variable.
-    """
-    __instance = None
-
-    @staticmethod
-    def getInstance():
-        if _SpatiaLiteSecurity.__instance is None:
-            _SpatiaLiteSecurity()
-        return _SpatiaLiteSecurity.__instance
-
-    def __init__(self):
-        """Default to 'strict' security."""
-        # Singleton logic
-        if _SpatiaLiteSecurity.__instance is not None:
-            raise TypeError("instance of singleton class 'SpatiaLiteSecurity'"
-                            "already exists.")
-        else:
-            _SpatiaLiteSecurity.__instance = self
-
-        # Set Default value for "SPATIALITE_SECURITY" if not set
-        os.environ.setdefault("SPATIALITE_SECURITY", "strict")
-
-    def get(self):
-        return os.environ["SPATIALITE_SECURITY"]
-
-    def set(self, value="strict"):
-        os.environ["SPATIALITE_SECURITY"] = value
-        return
-
-    def __str__(self):
-        return "SPATIALITE_SECURITY = '{}'".format(self.get())
-
-    def __repr__(self):
-        return "<_SpatiaLiteSecurity: {}>".format(self.__str__())
-
-
-# Implement SPATIALITE_SECURITY handler
-SPATIALITE_SECURITY = _SpatiaLiteSecurity()
-
-
 class SpatiaLiteError(Exception):
     """
     An explicit exception for use when SpatiaLite doesn't work as expected.
     """
     pass
-
-
-def check_security():
-    """
-    Raises a SpatiaLiteError when SPATIALITE_SECURITY environment variable is
-    not set to 'relaxed'.
-
-    Without raising an error, SpatiaLite doesn't provide some functions such as
-    ImportSHP.
-
-    Returns
-    -------
-    None
-    """
-    if not os.environ["SPATIALITE_SECURITY"] == "relaxed":
-        raise SpatiaLiteError(
-            "SPATIALITE_SECURITY variable not set to 'relaxed'")
-    return
 
 
 class SpatiaLiteDB(SQLiteDB):
@@ -121,6 +63,11 @@ class SpatiaLiteDB(SQLiteDB):
         Path to SQLite database or ":memory:" for in-memory database
     echo: bool
         Whether or not to repeat queries and messages back to user
+    relaxed_security: bool
+        Some SpatiaLite functions require that the environment variable
+        SPATIALITE_SECURITY is set to 'relaxed'. This must be set before
+        database connections are made, so this parameter handles that assuming
+        that functionality is desired by default.
     extensions: list
         List of extensions to load on connection. Default: ['mod_spatialite']
     """
@@ -130,12 +77,12 @@ class SpatiaLiteDB(SQLiteDB):
             echo=echo,
             extensions=extensions)
 
+        self.relaxed_security = os.environ["SPATIALITE_SECURITY"]
+
         # Initialize spatial metadata if the database is new
         if "geometry_columns" not in self.table_names:
             # Source: geoalchemy2 readthedocs tutorial
             self.con.execute(select([func.InitSpatialMetaData(1)]))
-
-        self.spatialite_security = "relaxed"  # TODO: State?
 
     def has_srid(self, srid):
         """
@@ -293,7 +240,8 @@ class SpatiaLiteDB(SQLiteDB):
         .. _`SpatiaLite's Functions Reference List`: https://www.gaia-gis.it/gaia-sins/spatialite-sql-4.3.0.html
         """
         # Validate parameters
-        check_security()
+        if not self.relaxed_security:
+            raise SpatiaLiteError("This function requires relaxed security")
         filename = os.path.splitext(filename)[0].replace("\\", "/")
         if not os.path.exists(filename + ".shp"):
             raise AttributeError("cannot find path specified")
@@ -345,7 +293,8 @@ class SpatiaLiteDB(SQLiteDB):
         .. _`SpatiaLite's Functions Reference List`: https://www.gaia-gis.it/gaia-sins/spatialite-sql-4.3.0.html
         """
         # Validate parameters
-        check_security()
+        if not self.relaxed_security:
+            raise SpatiaLiteError("This function requires relaxed security")
         if table_name not in self.table_names:
             raise AttributeError("table '{}' not found".format(table_name))
         filename = os.path.splitext(filename)[0].replace("\\", "/")
@@ -443,7 +392,7 @@ class SpatiaLiteDB(SQLiteDB):
         """
         df = self.sql(sql)
         if srid is not None:  # "geometry" in df.columns or "wkt" in df.columns:
-            return self.load_geodataframe(df, table_name, srid)
+            return self.load_geodataframe(df, table_name, srid, **kwargs)
         return self.load_dataframe(df, table_name)
 
     @property

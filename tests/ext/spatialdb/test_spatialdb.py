@@ -11,8 +11,6 @@ import geopandas as gpd
 from db2.ext import spatialdb as sdb
 
 
-os.environ["SPATIALITE_SECURITY"] = "relaxed"
-
 WILDERNESS = test_data = "./tests/ext/spatialdb/data/ContUSWildCentroids.shp"
 
 
@@ -35,25 +33,6 @@ class UtilTests(unittest.TestCase):
         self.assertTrue(d.has_srid(102700))  # now it is
         # If run again, do nothing
         self.assertEqual(d.get_spatial_ref_sys(102700, "esri"), 0)
-
-    def test_security(self):
-        # Value set before tests
-        # Test get
-        self.assertTrue(
-            sdb.SPATIALITE_SECURITY.get() == "relaxed")
-        # Test set
-        sdb.SPATIALITE_SECURITY.set("strict")
-        self.assertTrue(
-            os.environ["SPATIALITE_SECURITY"] == "strict")
-        sdb.SPATIALITE_SECURITY.set("relaxed")
-        self.assertEqual(
-            str(sdb.SPATIALITE_SECURITY.__repr__()),
-            "<_SpatiaLiteSecurity: SPATIALITE_SECURITY = 'relaxed'>")
-
-
-        # Can't make a new singleton
-        with self.assertRaises(TypeError) as e:
-            new = sdb.SPATIALITE_SECURITY.__new__()
 
 
 class MainTests(unittest.TestCase):
