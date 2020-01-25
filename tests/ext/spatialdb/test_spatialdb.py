@@ -54,7 +54,7 @@ class MainTests(unittest.TestCase):
         self.assertTrue(not df.empty and df["srid"].iat[0] == 4326)
 
 
-class ImportTests(unittest.TestCase):
+class ImportTests_Memory(unittest.TestCase):
     def setUp(self):
         pass
 
@@ -76,6 +76,20 @@ class ImportTests(unittest.TestCase):
 
     #def test_import_dbf(self):
     #    pass
+
+
+class ImportTests_OnDisk(unittest.TestCase):
+    def setUp(self):
+        self.path = "tests/ext/spatialdb/test_ondisk.sqlite"
+
+    def tearDown(self):
+        os.remove(self.path)
+
+    def test_importshp(self):
+        self.d = sdb.SpatiaLiteDB(self.path)
+        self.d.import_shp(WILDERNESS, "wild", srid=4326)
+        self.assertTrue("wild" in self.d.table_names)
+
 
 '''
 class ExportTests(unittest.TestCase):

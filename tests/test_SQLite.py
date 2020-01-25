@@ -1,5 +1,6 @@
 # !/usr/bin/env python2
 
+import os
 import unittest
 
 from db2 import SQLiteDB
@@ -27,3 +28,21 @@ class TestSQLite(unittest.TestCase):
         self.assertEqual(
             d.databases["file"].tolist(),
             [":memory:"])
+
+
+class TestOnDisk_notclosed(unittest.TestCase):
+    def setUp(self):
+        self.path = "tests/test_ondisk.sqlite"
+
+    def tearDown(self):
+        os.remove(self.path)
+
+    def test_writeread(self):
+        self.d = SQLiteDB(self.path)
+        self.d.sql("CREATE TABLE test (id INT PRIMARY KEY, name TEXT);")
+        self.d.sql("INSERT INTO test VALUES (?, ?)",
+                   [(1, 'AC/DC'), (2, 'Aerosmith')])
+        # Reconnect
+        self.d = SQLiteDB(self.path)
+        df = self.d.sql("SELECT * FROM test")
+        self.assertEqual(df["id"].tolist(), [1, 2])

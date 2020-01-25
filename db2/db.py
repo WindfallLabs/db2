@@ -490,6 +490,8 @@ class SQLiteDB(DB):
         # TODO: consider using Row factories
         # self._set_row_factory(Row)
 
+        self.dbapi_con.isolation_level = None
+
         # Similar functionality to sqlite command ".databases"
         self.databases = pd.DataFrame(
             OrderedDict([("name", "main"), ("file", self.dbname)]),
