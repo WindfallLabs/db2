@@ -3,12 +3,13 @@
 This module contains the DB superclass and all related subclasses.
 """
 
+import datetime
 import os
 import re
+import sqlite3
 import sys
 from collections import OrderedDict
 from decimal import Decimal
-from sqlite3 import Row
 
 try:
     from urllib import quote_plus
@@ -35,11 +36,22 @@ __all__ = [
     "MSSQLDB"
     ]
 
+
 # Display more columns; 25 by default
 pd.set_option('display.max_columns', 25)
 # Suppress scientific notation of floats to 6 digits (default)
 pd.set_option("display.float_format", "{:20,.6f}".format)
 
+
+# =============================================================================
+# SQLITE CONFIG
+
+sqlite3.register_adapter(datetime.datetime, utils.sqlite_adapt_datetime)
+sqlite3.register_adapter(Decimal, utils.sqlite_adapt_decimal)
+
+
+# =============================================================================
+# DATABASE OBJECTS
 
 class DB(object):
     """
@@ -434,13 +446,6 @@ class DB(object):
         """
         kwargs.setdefault("index", False)
         # TODO: enforce datatypes and column name requirements
-        if self.dbtype == "sqlite":
-            # Convert datetimes to string
-            df = df.apply(lambda x: x.astype(str)
-                          if str(x.dtype).startswith("date") else x)
-        # SQLAlchemy doesn't seem to like decimal.Decimal types
-        df = df.apply(lambda x: pd.to_numeric(x) if any(
-            set(x.apply(lambda x: isinstance(x, Decimal)))) else x)
 
         df.to_sql(table_name, self.engine, **kwargs)
         return
@@ -488,7 +493,7 @@ class SQLiteDB(DB):
             echo=echo,
             extensions=extensions)
         # TODO: consider using Row factories
-        # self._set_row_factory(Row)
+        # self._set_row_factory(sqlite3.Row)
 
         self.dbapi_con.isolation_level = None
 

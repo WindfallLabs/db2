@@ -9,6 +9,19 @@ from decimal import Decimal
 import pandas as pd
 import sqlparse
 
+import db2
+
+
+def sqlite_adapt_datetime(date_time):
+    """Adapts ``datetime.datetime`` types to SQLite TEXT with."""
+    return date_time.strftime(db2.SQLITE_DATETIME_FORMAT)
+
+
+def sqlite_adapt_decimal(decimal):
+    """Adapts ``decimal.Decimal`` types to FLOAT."""
+    return float(decimal)
+
+
 
 # =============================================================================
 # Pandas Vector Functions:
@@ -26,6 +39,8 @@ def dates_to_strs(col):
 def decimals_to_floats(col):
     """
     Converts all DataFrame Series of decimal.Decimal types to floats.
+
+    NOTE: SQLite automatically handles this on INSERT with ``adapt_decimals``.
     """
     if any(set(col.apply(lambda x: isinstance(x, Decimal)))):
         return pd.to_numeric(col)

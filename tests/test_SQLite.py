@@ -2,7 +2,10 @@
 
 import os
 import unittest
+from datetime import datetime
+from decimal import Decimal
 
+import db2
 from db2 import SQLiteDB
 
 CHINOOK = "./chinook.sqlite"
@@ -29,6 +32,30 @@ class TestSQLite(unittest.TestCase):
             d.databases["file"].tolist(),
             [":memory:"])
 
+    def test_decimal_adapter(self):
+        d = SQLiteDB(":memory:")
+        d.sql("CREATE TABLE decimal_test (id INT PRIMARY KEY, value FLOAT);")
+        d.sql("INSERT INTO decimal_test VALUES (?, ?);",
+              [(1, Decimal(1)), (2, Decimal(3.14))])
+        df = d.sql("SELECT * FROM decimal_test")
+        self.assertTrue(not df.empty)
+
+    def test_datetime_adapter_default(self):
+        now = datetime.now()
+        d = SQLiteDB(":memory:")
+        d.sql("CREATE TABLE test_dates (id INT PRIMARY KEY, ddate FLOAT);")
+        d.sql("INSERT INTO test_dates VALUES (?, ?);", (1, now))
+        ddate = d.sql("SELECT ddate FROM test_dates WHERE id=1")["ddate"].iat[0]
+        self.assertEqual(ddate, now.strftime(db2.SQLITE_DATETIME_FORMAT))
+
+    def test_datetime_adapter_custom(self):
+        db2.SQLITE_DATETIME_FORMAT = "%d %b, %Y"
+        now = datetime.now()
+        d = SQLiteDB(":memory:")
+        d.sql("CREATE TABLE test_dates (id INT PRIMARY KEY, ddate FLOAT);")
+        d.sql("INSERT INTO test_dates VALUES (?, ?);", (1, now))
+        ddate = d.sql("SELECT ddate FROM test_dates WHERE id=1")["ddate"].iat[0]
+        self.assertEqual(ddate, now.strftime(db2.SQLITE_DATETIME_FORMAT))
 
 class TestOnDisk_notclosed(unittest.TestCase):
     def setUp(self):
