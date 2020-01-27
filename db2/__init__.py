@@ -1,3 +1,5 @@
+from __future__ import unicode_literals
+
 from db import DB
 from db import SQLiteDB, MSSQLDB, PostgresDB
 
@@ -6,5 +8,7 @@ __email__ = 'garwall101@gmail.com'
 __version__ = '0.0.1'
 
 
-SQLITE_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
-"""Format to strftime() datetime objects to on INSERT (SQLite)."""
+options = {
+    "sqlite_datetime_format": u"%Y-%m-%d %H:%M:%S"
+}
+

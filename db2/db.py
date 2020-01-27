@@ -3,6 +3,8 @@
 This module contains the DB superclass and all related subclasses.
 """
 
+from __future__ import unicode_literals
+
 import datetime
 import os
 import re
@@ -45,13 +47,16 @@ pd.set_option("display.float_format", "{:20,.6f}".format)
 
 # =============================================================================
 # SQLITE CONFIG
+# =============================================================================
 
+# Register type adapters (defined in db2.utils)
 sqlite3.register_adapter(datetime.datetime, utils.sqlite_adapt_datetime)
 sqlite3.register_adapter(Decimal, utils.sqlite_adapt_decimal)
 
 
 # =============================================================================
-# DATABASE OBJECTS
+# DATABASE OBJECTS / DB SUPERCLASS
+# =============================================================================
 
 class DB(object):
     """
@@ -95,7 +100,7 @@ class DB(object):
 
         self._encoding = encoding
         # Credentials
-        # TODO: copy over db.py's utils.py and implement profiles
+        # TODO: copy over db.py's utils.py for profile save/load handling
         self.credentials = {
                 "user": username,
                 "pwd": password,
@@ -108,28 +113,28 @@ class DB(object):
         self._echo = echo
         self._extensions = extensions
 
-        # Prepare connection to database (create database URL if needed)
+        # TODO: self.credentials doesn't get populated if URL is provided
         if url:
             self._url = url
+            self.credentials["dbtype"] = url.split(":")[0].split("+")[0]
+        # Prepare database URL from credentials
         else:
             self._url = DB._create_url(**self.credentials)
 
         # Create engine
         self.engine = create_engine(self._url)
-        self.dbapi_con = None  # Is set by listen
 
         # Get DBAPI connection and cursor objects on connect
         listen(self.engine, 'connect', self._on_connect)
         # Connect
-        self.con = self.engine.connect()  # Also creates self.dbapi_con
+        self.sqla_con = self.engine.connect()  # Also creates self.con
         # DBAPI Cursor
-        self.cur = self.dbapi_con.cursor()
+        self.cur = self.con.cursor()
 
         # Create session (WIP)
         self.session = sessionmaker(bind=self.engine)()
 
         # Misc
-        self._handlebars = pybars.Compiler()
         self._last_result = None
         self._max_return_rows = 10
 
@@ -166,7 +171,7 @@ class DB(object):
 
     def _on_connect(self, conn, _):
         """Get DBAPI2 Connection."""
-        setattr(self, "dbapi_con", conn)
+        setattr(self, "con", conn)
         return
 
     @property
@@ -227,7 +232,8 @@ class DB(object):
         """
         return ["\?", "\:\w+"]  # Default for SQLite (?, and :var style)
 
-    def _apply_handlebars(self, sql, data, union=True):
+    @staticmethod
+    def _apply_handlebars( sql, data, union=True):
         """
         Create queries using Handlebars style templates
 
@@ -256,7 +262,7 @@ class DB(object):
         """
         if (sys.version_info < (3, 0)):
             sql = unicode(sql)
-        template = self._handlebars.compile(sql)
+        template = pybars.Compiler().compile(sql)
         has_semicolon = True if sql.endswith(";") else False
         if isinstance(data, list):
             query = [template(item) for item in data]
@@ -314,7 +320,7 @@ class DB(object):
 
     def _concat_dfs(sqlfunc):
         """Decorates DB.sql()."""
-        def sql_wrapper(d, sql, data=None):
+        def sql_wrapper(d, sql, data=None, union=False):
             """
             Executes one or more SQL statements.
 
@@ -335,6 +341,11 @@ class DB(object):
                 echo of the statement and number of successful operations.
             """
             dfs = []
+            # Allow UNIONing multiple statements iterated over data
+            if union:
+                sql = DB._apply_handlebars(sql, data, union=True)
+                return sqlfunc(d, sql)
+
             parsed = sqlparse.parse(sql)
 
             # Iterate over statements passed. Single statements that iterate
@@ -352,29 +363,41 @@ class DB(object):
         return sql_wrapper
 
     @_concat_dfs
-    def sql(self, sql, data=None):
-        #cur = self.dbapi_con.cursor()
+    def sql(self, sql, data=None, union=False):
         # Apply handlebars to single statement
+        many = False
         if isinstance(data, dict) and "{{" in sql:
             sql = self._apply_handlebars(sql, data)
+            if self._echo:
+                print(sql)
             self.cur.execute(sql)
+
         # Use placeholders/variables
         elif data is not None:
             # Execute many (iterate SQL over input data)
             if (isinstance(data, (list, tuple))
                     and isinstance(data[0], (dict, tuple))):
+                many = True
                 for dat in data:
                     # Iteratively apply handlebars to statement
                     if "{{" in sql:
                         s = self._apply_handlebars(sql, dat)  # TODO: log SQL
+                        if self._echo:
+                            print(sql)
                         self.cur.execute(s)
                     else:
+                        if self._echo:
+                            print(sql)
                         self.cur.execute(sql, dat)
             # Execute single with placeholders/variables
             else:
+                if self._echo:
+                    print(sql)
                 self.cur.execute(sql, data)
         else:
             # Execute single statement without placeholders/variables
+            if self._echo:
+                print(sql)
             self.cur.execute(sql)
 
         try:
@@ -384,24 +407,25 @@ class DB(object):
             # If the SQL doesn't return column names in the cursor.description
             columns = ["SQL", "Result"]
 
-        # Get the data
+        # Get the results
         try:
-            data = self.cur.fetchall()
+            results = self.cur.fetchall()
         except OperationalError:
-            data = []
+            results = []
 
         # Executed SQL did not return data
-        if data in ([], None):
+        if results in ([], None):
             # If columns weren't returned
             if columns == ["SQL", "Result"]:
-                data = [[sql, 1]]
+                if many is True:
+                    results = [[sql, len(data)]]
+                else:
+                    results = [[sql, 1]]
             # SQL returned an empty table
             else:
-                data = None
+                results = None
 
-        if self._echo:
-            print(sql)
-        return pd.DataFrame(data, columns=columns)
+        return pd.DataFrame(results, columns=columns)
 
     def execute_script_file(self, filename, data=None):
         """
@@ -454,13 +478,12 @@ class DB(object):
         """Creates a table from a mapping object."""
         mapping.__table__.create(self.engine)
         return
-    '''
+
     def close(self):
         """Close the database connection."""
         self.con.close()
         self.engine.dispose()
         return
-    '''
 
     def __del__(self):
         self.close()
@@ -472,6 +495,10 @@ class DB(object):
     def __repr__(self):
         return self.__str__()
 
+
+# =============================================================================
+# DB SUBCLASSES
+# =============================================================================
 
 class SQLiteDB(DB):
     """
@@ -495,7 +522,7 @@ class SQLiteDB(DB):
         # TODO: consider using Row factories
         # self._set_row_factory(sqlite3.Row)
 
-        self.dbapi_con.isolation_level = None
+        self.con.isolation_level = None
 
         # Similar functionality to sqlite command ".databases"
         self.databases = pd.DataFrame(
@@ -504,16 +531,16 @@ class SQLiteDB(DB):
 
     def _on_connect(self, conn, _):
         """Get DBAPI2 Connection and load all specified extensions."""
-        setattr(self, "dbapi_con", conn)
-        self.dbapi_con.enable_load_extension(True)
+        setattr(self, "con", conn)
+        self.con.enable_load_extension(True)
         for ext in self._extensions:
-            self.dbapi_con.load_extension(ext)
+            self.con.load_extension(ext)
         return
 
     def _set_row_factory(self, factory):
         """Change how cursors return database records."""
-        self.dbapi_con.row_factory = factory
-        self.cur = self.dbapi_con.cursor()
+        self.con.row_factory = factory
+        self.cur = self.con.cursor()
         return
 
     def attach_db(self, db_path, name=None):

@@ -14,6 +14,8 @@ export C_INCLUDE_PATH=/usr/include/gdal
 pip install GDAL==$(gdal-config --version) --global-option=build_ext --global-option="-I/usr/include/gdal"
 """
 
+from __future__ import unicode_literals
+
 import os
 import sys
 
@@ -63,11 +65,6 @@ class SpatiaLiteDB(SQLiteDB):
         Path to SQLite database or ":memory:" for in-memory database
     echo: bool
         Whether or not to repeat queries and messages back to user
-    relaxed_security: bool
-        Some SpatiaLite functions require that the environment variable
-        SPATIALITE_SECURITY is set to 'relaxed'. This must be set before
-        database connections are made, so this parameter handles that assuming
-        that functionality is desired by default.
     extensions: list
         List of extensions to load on connection. Default: ['mod_spatialite']
     """
@@ -81,8 +78,9 @@ class SpatiaLiteDB(SQLiteDB):
 
         # Initialize spatial metadata if the database is new
         if "geometry_columns" not in self.table_names:
+            # NOTE: Use SQLAlchemy rather than the DB API con
             # Source: geoalchemy2 readthedocs tutorial
-            self.con.execute(select([func.InitSpatialMetaData(1)]))
+            self.sqla_con.execute(select([func.InitSpatialMetaData(1)]))
 
     def has_srid(self, srid):
         """
@@ -161,7 +159,8 @@ class SpatiaLiteDB(SQLiteDB):
         # Convert geometry to WKT
         gdf["geometry"] = gdf["geometry"].apply(lambda x: x.wkt)
         # Load the table using pandas
-        gdf.to_sql(table_name, self.dbapi_con, **kwargs)
+        #gdf.to_sql(table_name, self.dbapi_con, **kwargs)
+        gdf.to_sql(table_name, self.con, **kwargs)
         # Convert from WKT to SpatiaLite geometry
         r = r.append(self.sql(
             "UPDATE {{tbl}} SET geometry = GeomFromText(geometry, {{srid}});",
@@ -183,7 +182,8 @@ class SpatiaLiteDB(SQLiteDB):
                                   "SET geometry = MakeValid(geometry) "
                                   "WHERE NOT IsValid(geometry);",
                                   data={"tbl": table_name}))
-        self.dbapi_con.commit()  # NOTE: this is here to prevent overwrite bug
+        #self.dbapi_con.commit()  # NOTE: this is here to prevent overwrite bug
+        self.con.commit()  # NOTE: this is here to prevent overwrite bug
         # where geometry tables disappear when a new one is loaded
         r = r.append(
             pd.DataFrame([["Load GeoDataFrame", len(gdf)]], columns=rcols))

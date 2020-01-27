@@ -3,6 +3,8 @@
 Misc functions and helpers.
 """
 
+from __future__ import unicode_literals
+
 from dateutil.parser import parse as parse_date
 from decimal import Decimal
 
@@ -12,15 +14,19 @@ import sqlparse
 import db2
 
 
+# =============================================================================
+# SQLite Adapter Functions:
+# These functions must be registered with the sqlite3 library
+# =============================================================================
+
 def sqlite_adapt_datetime(date_time):
     """Adapts ``datetime.datetime`` types to SQLite TEXT with."""
-    return date_time.strftime(db2.SQLITE_DATETIME_FORMAT)
+    return date_time.strftime(db2.options["sqlite_datetime_format"])
 
 
 def sqlite_adapt_decimal(decimal):
     """Adapts ``decimal.Decimal`` types to FLOAT."""
     return float(decimal)
-
 
 
 # =============================================================================
@@ -46,6 +52,7 @@ def decimals_to_floats(col):
         return pd.to_numeric(col)
     return col
 
+
 # =============================================================================
 # Parsed SQL Functions:
 # =============================================================================
@@ -66,8 +73,8 @@ def is_query(parsed_sql):
         not a function.
     """
     tokens = [t for t in parsed_sql.tokens if not t.is_whitespace]
-    return parsed_sql.get_type() == u"SELECT" and not type(
-        tokens[0]).__name__ == "Function"
+    return parsed_sql.get_type() == "SELECT" and not type(
+        tokens[1]).__name__ == "Function"
 
 
 # =============================================================================
@@ -106,7 +113,7 @@ def pystrftime(directive, timestring):
         >>> d.dbapi_con.create_function("pystrftime", 2, utils.pystrftime)
         >>> month = d.sql("SELECT pystrftime('%b', '2020-01-01') AS abbr;")
         >>> month["abbr"].iat[0]
-        u'Jan'
+        'Jan'
 
 
     Also see SQLite_ and datetime_ references.

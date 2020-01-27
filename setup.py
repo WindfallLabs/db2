@@ -2,11 +2,28 @@
 
 """The setup script."""
 
+import os
+import sys
+import webbrowser
 from setuptools import setup, find_packages
 
-# NOTES:
-# coverage run --source db2 -m py.test; coverage html
-#
+
+# Add development commands here
+if sys.argv:
+    # Build HTML Docs with Sphinx
+    if sys.argv[1] in ("docs", "document"):
+        os.system("sphinx-build -b html ./docs ./docs/_build")
+        if any([arg in sys.argv for arg in ("-o", "--open")]):
+            webbrowser.open("docs/_build/index.html")
+
+    # Calculate coverage stats
+    elif sys.argv[1] == "coverage":
+        os.system("coverage run --source db2 -m py.test --doctest-glob=examples/*.rst; coverage html")
+        # Open the index.html
+        if any([arg in sys.argv for arg in ("-o", "--open")]):
+            webbrowser.open("htmlcov/index.html")
+    exit()
+
 
 with open('README.rst') as readme_file:
     readme = readme_file.read()

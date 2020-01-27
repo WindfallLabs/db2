@@ -1,5 +1,7 @@
 # !/usr/bin/env python2
 
+from __future__ import unicode_literals
+
 import os
 import unittest
 from datetime import datetime
@@ -8,12 +10,14 @@ from decimal import Decimal
 import db2
 from db2 import SQLiteDB
 
-CHINOOK = "./chinook.sqlite"
+CHINOOK = "tests/chinook.sqlite"
 
 
 class TestSQLite(unittest.TestCase):
     def test_has_executemany(self):
         d = SQLiteDB(":memory:")
+        self.assertTrue(hasattr(d, "con"))
+        self.assertTrue(hasattr(d, "sqla_con"))
         self.assertTrue(hasattr(d.cur, "executemany"))
 
     def test_attach_and_detach(self):
@@ -22,7 +26,7 @@ class TestSQLite(unittest.TestCase):
         d.attach_db(CHINOOK)
         self.assertEqual(
             d.databases["file"].tolist(),
-            [":memory:", "./chinook.sqlite"])
+            [":memory:", "tests/chinook.sqlite"])
         self.assertEqual(
             d.databases["name"].tolist(),
             ["main", "chinook"])
@@ -46,7 +50,8 @@ class TestSQLite(unittest.TestCase):
         d.sql("CREATE TABLE test_dates (id INT PRIMARY KEY, ddate FLOAT);")
         d.sql("INSERT INTO test_dates VALUES (?, ?);", (1, now))
         ddate = d.sql("SELECT ddate FROM test_dates WHERE id=1")["ddate"].iat[0]
-        self.assertEqual(ddate, now.strftime(db2.SQLITE_DATETIME_FORMAT))
+        self.assertEqual(ddate,
+                         now.strftime(db2.options["sqlite_datetime_format"]))
 
     def test_datetime_adapter_custom(self):
         db2.SQLITE_DATETIME_FORMAT = "%d %b, %Y"
@@ -55,7 +60,9 @@ class TestSQLite(unittest.TestCase):
         d.sql("CREATE TABLE test_dates (id INT PRIMARY KEY, ddate FLOAT);")
         d.sql("INSERT INTO test_dates VALUES (?, ?);", (1, now))
         ddate = d.sql("SELECT ddate FROM test_dates WHERE id=1")["ddate"].iat[0]
-        self.assertEqual(ddate, now.strftime(db2.SQLITE_DATETIME_FORMAT))
+        self.assertEqual(ddate,
+                         now.strftime(db2.options["sqlite_datetime_format"]))
+
 
 class TestOnDisk_notclosed(unittest.TestCase):
     def setUp(self):
@@ -68,7 +75,7 @@ class TestOnDisk_notclosed(unittest.TestCase):
         self.d = SQLiteDB(self.path)
         self.d.sql("CREATE TABLE test (id INT PRIMARY KEY, name TEXT);")
         self.d.sql("INSERT INTO test VALUES (?, ?)",
-                   [(1, 'AC/DC'), (2, 'Aerosmith')])
+                   [(1, 'AC/DC'), (2, 'Accept')])
         # Reconnect
         self.d = SQLiteDB(self.path)
         df = self.d.sql("SELECT * FROM test")

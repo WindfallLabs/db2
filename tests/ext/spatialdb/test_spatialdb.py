@@ -3,6 +3,8 @@
 Test ext.spatialdb module
 """
 
+from __future__ import unicode_literals
+
 import os
 import unittest
 
@@ -71,8 +73,9 @@ class ImportTests_Memory(unittest.TestCase):
     def test_import_shp(self):
         os.environ["SPATIALITE_SECURITY"] = "relaxed"  # TODO: rm
         d = sdb.SpatiaLiteDB(":memory:")
-        d.import_shp(WILDERNESS, "wild", srid=4326)
+        r = d.import_shp(WILDERNESS, "wild", srid=4326)
         self.assertTrue("wild" in d.table_names)
+        self.assertEqual(r.iloc[0][0], 742)
 
     #def test_import_dbf(self):
     #    pass
@@ -87,8 +90,9 @@ class ImportTests_OnDisk(unittest.TestCase):
 
     def test_importshp(self):
         self.d = sdb.SpatiaLiteDB(self.path)
-        self.d.import_shp(WILDERNESS, "wild", srid=4326)
+        r = self.d.import_shp(WILDERNESS, "wild", srid=4326)
         self.assertTrue("wild" in self.d.table_names)
+        self.assertEqual(r.iloc[0][0], 742)
 
 
 '''

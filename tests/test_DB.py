@@ -4,14 +4,11 @@ Test db module
 """
 
 import unittest
-from collections import namedtuple
-from sqlite3 import OperationalError
-
-import pandas as pd
-from sqlalchemy import Column, Integer, String
-from sqlalchemy.ext.declarative import declarative_base
 
 from db2 import DB, SQLiteDB
+
+
+CHINOOK = "tests/chinook.sqlite"
 
 
 class TestDatabaseProperties(unittest.TestCase):
@@ -21,7 +18,6 @@ class TestDatabaseProperties(unittest.TestCase):
     def test_dbtype(self):
         self.assertTrue(self.d.dbtype == "sqlite")
         self.assertTrue(self.d.dbname == ":memory:")
-
 
     def test_table_names_one(self):
         # New db has no tables
@@ -44,6 +40,11 @@ class TestSQL(unittest.TestCase):
 
     def tearDown(self):
         del self.d
+
+    def test_pragma(self):
+        self.create_test_table()
+        # Test pragma
+        self.assertTrue(not self.d.sql("PRAGMA table_info('test');").empty)
 
     def test_script(self):
         # Test executescript
@@ -132,13 +133,30 @@ class TestSQL(unittest.TestCase):
         r = self.d.sql("SELECT * FROM test WHERE id > {{id}}", {"id": 2})
         self.assertTrue(r["name"].tolist() == ["Three"])
 
-    def test_pragma(self):
-        self.create_test_table()
-        # Test pragma
-        self.assertTrue(not self.d.sql("PRAGMA table_info('test');").empty)
+    def test_sql_union(self):
+        q = """
+        SELECT '{{ name }}' as table_name, sum(1) as cnt
+        FROM {{ name }}
+        GROUP BY table_name
+        """
+        data = [
+            {"name": "Album"},
+            {"name": "Artist"},
+            {"name": "Track"}
+        ]
+        d = SQLiteDB(CHINOOK)
+        r = d.sql(q, data, union=True)
+        self.assertEqual(r.columns.tolist(), ["table_name", "cnt"])
+        self.assertEqual(r["cnt"].sum(), 4125)
 
 
 class TestDatabaseURLs(unittest.TestCase):
+    def test_url(self):
+        d = DB(url="sqlite:///:memory:")
+        # TODO: parse the URL for credential components?
+        # self.assertEqual(d.dbname, ":memory:")
+        self.assertEqual(d.dbtype, "sqlite")
+
     def test_sqlite(self):
         self.assertEqual(
             DB._create_url(dbname=":memory:", dbtype="sqlite"),
