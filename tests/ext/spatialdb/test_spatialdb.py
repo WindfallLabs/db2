@@ -84,9 +84,12 @@ class ImportTests_Memory(unittest.TestCase):
 class ImportTests_OnDisk(unittest.TestCase):
     def setUp(self):
         self.path = "tests/ext/spatialdb/test_ondisk.sqlite"
+        if os.path.exists(self.path):
+            os.remove(self.path)
 
     def tearDown(self):
-        os.remove(self.path)
+        # os.remove(self.path) causes WindowsError, fine on Linux
+        pass
 
     def test_importshp(self):
         self.d = sdb.SpatiaLiteDB(self.path)

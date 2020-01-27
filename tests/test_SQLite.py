@@ -67,9 +67,12 @@ class TestSQLite(unittest.TestCase):
 class TestOnDisk_notclosed(unittest.TestCase):
     def setUp(self):
         self.path = "tests/test_ondisk.sqlite"
+        if os.path.exists(self.path):
+            os.remove(self.path)
 
     def tearDown(self):
-        os.remove(self.path)
+        # os.remove(self.path) causes WindowsError, fine on Linux
+        pass
 
     def test_writeread(self):
         self.d = SQLiteDB(self.path)
