@@ -15,6 +15,7 @@ if sys.argv:
         os.system("sphinx-build -b html ./docs ./docs/_build")
         if any([arg in sys.argv for arg in ("-o", "--open")]):
             webbrowser.open("docs/_build/index.html")
+        exit()
 
     # Calculate coverage stats
     elif sys.argv[1] == "coverage":
@@ -22,7 +23,7 @@ if sys.argv:
         # Open the index.html
         if any([arg in sys.argv for arg in ("-o", "--open")]):
             webbrowser.open("htmlcov/index.html")
-    exit()
+        exit()
 
 
 with open('README.rst') as readme_file:
