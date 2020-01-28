@@ -7,6 +7,7 @@ from __future__ import unicode_literals
 
 from dateutil.parser import parse as parse_date
 from decimal import Decimal
+import inspect
 
 import pandas as pd
 import sqlparse
@@ -80,6 +81,26 @@ def is_query(parsed_sql):
 # =============================================================================
 # SQL Functions:
 # =============================================================================
+
+def make_sqlite_function(conn, func):
+    """
+    Load a Python function into an SQLite database for use in SQL statements.
+
+    Parameters
+    ----------
+    conn: sqlite3.connection
+        The DB API connection to the SQLite database.
+    func: function
+        The Python function to use in the SQLite database.
+    """
+    name = func.__name__
+    try:
+        num_args = len(inspect.getfullargspec(func).args)
+    except AttributeError:
+        num_args = len(inspect.getargspec(func).args)
+    conn.create_function(name, num_args, func)        
+    return
+
 
 def pystrftime(directive, timestring):
     """

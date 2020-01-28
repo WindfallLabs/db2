@@ -96,7 +96,7 @@ class DB(object):
     """
     def __init__(self, url=None, username=None, password=None, hostname=None,
                  port=None, dbname=None, dbtype=None, driver=None,
-                 encoding="utf8", echo=False, extensions=[]):
+                 encoding="utf8", echo=False):
 
         self._encoding = encoding
         # Credentials
@@ -111,7 +111,6 @@ class DB(object):
                 "driver": str(driver).lower() if driver else None
                 }
         self._echo = echo
-        self._extensions = extensions
 
         # TODO: self.credentials doesn't get populated if URL is provided
         if url:
@@ -127,9 +126,9 @@ class DB(object):
         # Get DBAPI connection and cursor objects on connect
         listen(self.engine, 'connect', self._on_connect)
         # Connect
-        self.sqla_con = self.engine.connect()  # Also creates self.con
+        self.con = self.engine.connect()  # Also creates self.con
         # DBAPI Cursor
-        self.cur = self.con.cursor()
+        #self.cur = self.con.cursor()
 
         # Create session (WIP)
         self.session = sessionmaker(bind=self.engine)()
@@ -370,7 +369,7 @@ class DB(object):
             sql = self._apply_handlebars(sql, data)
             if self._echo:
                 print(sql)
-            self.cur.execute(sql)
+            rprox = self.engine.execute(sql)
 
         # Use placeholders/variables
         elif data is not None:
@@ -384,33 +383,34 @@ class DB(object):
                         s = self._apply_handlebars(sql, dat)  # TODO: log SQL
                         if self._echo:
                             print(sql)
-                        self.cur.execute(s)
+                        rprox = self.engine.execute(s)
                     else:
                         if self._echo:
                             print(sql)
-                        self.cur.execute(sql, dat)
+                        rprox = self.engine.execute(sql, dat)
             # Execute single with placeholders/variables
             else:
                 if self._echo:
                     print(sql)
-                self.cur.execute(sql, data)
+                rprox = self.engine.execute(sql, data)
         else:
             # Execute single statement without placeholders/variables
             if self._echo:
                 print(sql)
-            self.cur.execute(sql)
+            rprox = self.engine.execute(sql)
 
         try:
             # Get column names from cursor
-            columns = [i[0] for i in self.cur.description]
+            columns = rprox.keys()
         except (TypeError, AttributeError):
             # If the SQL doesn't return column names in the cursor.description
             columns = ["SQL", "Result"]
 
         # Get the results
         try:
-            results = self.cur.fetchall()
-        except OperationalError:
+            results = rprox.fetchall()
+        #except OperationalError:
+        except ResourceClosedError:
             results = []
 
         # Executed SQL did not return data
@@ -481,7 +481,7 @@ class DB(object):
 
     def close(self):
         """Close the database connection."""
-        self.con.close()
+        #self.con.close()
         self.engine.dispose()
         return
 
@@ -513,16 +513,13 @@ class SQLiteDB(DB):
     extensions: list
         List of extensions to load on connection
     """
-    def __init__(self, dbname, echo=False, extensions=[]):
+    def __init__(self, dbname, echo=False, extensions=None, functions=None):
+        self._extensions = extensions
+        self._functions = functions
         super(SQLiteDB, self).__init__(
             dbname=dbname,
             dbtype="sqlite",
-            echo=echo,
-            extensions=extensions)
-        # TODO: consider using Row factories
-        # self._set_row_factory(sqlite3.Row)
-
-        self.con.isolation_level = None
+            echo=echo)
 
         # Similar functionality to sqlite command ".databases"
         self.databases = pd.DataFrame(
@@ -531,16 +528,15 @@ class SQLiteDB(DB):
 
     def _on_connect(self, conn, _):
         """Get DBAPI2 Connection and load all specified extensions."""
-        setattr(self, "con", conn)
-        self.con.enable_load_extension(True)
-        for ext in self._extensions:
-            self.con.load_extension(ext)
-        return
-
-    def _set_row_factory(self, factory):
-        """Change how cursors return database records."""
-        self.con.row_factory = factory
-        self.cur = self.con.cursor()
+        conn.enable_load_extension(True)
+        if isinstance(self._extensions, list):
+            for ext in self._extensions:
+                conn.load_extension(ext)
+        # Load Python functions into the database for use in SQL
+        if isinstance(self._functions, list):
+            for func in self._functions:
+                # For each function in the list
+                utils.make_sqlite_function(conn, func)
         return
 
     def attach_db(self, db_path, name=None):
@@ -561,24 +557,24 @@ class SQLiteDB(DB):
         # Default name to filename
         if name is None:
             name = os.path.basename(db_path).split(".")[0]
-        self.cur.execute("ATTACH :file AS :name;",
-                         {"file": db_path, "name": name})
+        self.engine.execute("ATTACH :file AS :name;",
+                            {"file": db_path, "name": name})
 
         # Append alias and path to self.databases dataframe
         self.databases.loc[len(self.databases)] = [name, db_path]
-        return self.cur.fetchall()
+        return 1
 
     def detach_db(self, name):
         """
         Detaches an attached database by name via ``DETACH DATABASE :name;``.
         """
-        self.cur.execute("DETACH DATABASE :name;", {"name": name})
+        self.engine.execute("DETACH DATABASE :name;", {"name": name})
 
         # Remove the alias from self.databases dataframe
         self.databases.drop(
             self.databases[self.databases["name"] == name].index,
             inplace=True)
-        return self.cur.fetchall()
+        return 1
 
     def create_table_as(self, table_name, sql, **kwargs):  # TODO: add tests
         """
@@ -637,6 +633,8 @@ class MSSQLDB(DB):
             driver=driver,
             echo=echo)
         self.sql("USE {{dbname}};", {"dbname": dbname})
+
+        _ = self.table_names  # Establishes connection I guess...
 
     @property
     def table_names(self):

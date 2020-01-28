@@ -80,7 +80,7 @@ class SpatiaLiteDB(SQLiteDB):
         if "geometry_columns" not in self.table_names:
             # NOTE: Use SQLAlchemy rather than the DB API con
             # Source: geoalchemy2 readthedocs tutorial
-            self.sqla_con.execute(select([func.InitSpatialMetaData(1)]))
+            self.engine.execute(select([func.InitSpatialMetaData(1)]))
 
     def has_srid(self, srid):
         """
@@ -182,9 +182,6 @@ class SpatiaLiteDB(SQLiteDB):
                                   "SET geometry = MakeValid(geometry) "
                                   "WHERE NOT IsValid(geometry);",
                                   data={"tbl": table_name}))
-        #self.dbapi_con.commit()  # NOTE: this is here to prevent overwrite bug
-        self.con.commit()  # NOTE: this is here to prevent overwrite bug
-        # where geometry tables disappear when a new one is loaded
         r = r.append(
             pd.DataFrame([["Load GeoDataFrame", len(gdf)]], columns=rcols))
         return r.reset_index(drop=True)

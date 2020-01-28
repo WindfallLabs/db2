@@ -14,12 +14,6 @@ CHINOOK = "tests/chinook.sqlite"
 
 
 class TestSQLite(unittest.TestCase):
-    def test_has_executemany(self):
-        d = SQLiteDB(":memory:")
-        self.assertTrue(hasattr(d, "con"))
-        self.assertTrue(hasattr(d, "sqla_con"))
-        self.assertTrue(hasattr(d.cur, "executemany"))
-
     def test_attach_and_detach(self):
         d = SQLiteDB(":memory:")
         # Attach

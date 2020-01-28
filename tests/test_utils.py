@@ -64,7 +64,6 @@ class SQLFunctionTests(unittest.TestCase):
         pass
 
     def test_pystrftime(self):
-        d = db2.SQLiteDB(":memory:")
-        d.con.create_function("pystrftime", 2, utils.pystrftime)
+        d = db2.SQLiteDB(":memory:", functions=[utils.pystrftime])
         month = d.sql("SELECT pystrftime('%b', '2020-01-01') AS abbr;")
         self.assertEqual(month["abbr"].iat[0], "Jan")

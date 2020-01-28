@@ -53,7 +53,7 @@ class TestSQL(unittest.TestCase):
             "CREATE TABLE test (id INT PRIMARY KEY, name TEXT NOT NULL); ")
 
     def create_test_table(self):
-        self.d.cur.execute(
+        self.d.engine.execute(
             "CREATE TABLE test (id INT PRIMARY KEY, name TEXT NOT NULL);")
 
     def test_select_empty_dataframe(self):
