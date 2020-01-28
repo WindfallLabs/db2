@@ -29,6 +29,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
 import utils
+from schema import Schema
 
 
 __all__ = [
@@ -128,11 +129,9 @@ class DB(object):
         # Connect
         self.con = self.engine.connect()  # Also creates self.con
         # Get metadata object for accessing schema
-        self.meta = MetaData()
-        self.meta.reflect(bind=self.engine)
-
-        # Create session (WIP)
-        self.session = sessionmaker(bind=self.engine)()
+        #self.meta = MetaData(bind=self.engine)
+        #self.meta.reflect(bind=self.engine)
+        self.schema = Schema(self)
 
         # Misc
         self._last_result = None
@@ -179,7 +178,7 @@ class DB(object):
         """
         Returns the database name.
         """
-        return self.credentials["dbname"]
+        return os.path.basename(self.credentials["dbname"])
 
     @property
     def dbtype(self):
@@ -237,7 +236,7 @@ class DB(object):
         return ["\?", "\:\w+"]  # Default for SQLite (?, and :var style)
 
     @staticmethod
-    def _apply_handlebars( sql, data, union=True):
+    def _apply_handlebars(sql, data, union=True):
         """
         Create queries using Handlebars style templates
 
@@ -413,7 +412,6 @@ class DB(object):
         # Get the results
         try:
             results = rprox.fetchall()
-        #except OperationalError:
         except ResourceClosedError:
             results = []
 
@@ -485,7 +483,6 @@ class DB(object):
 
     def close(self):
         """Close the database connection."""
-        #self.con.close()
         self.engine.dispose()
         return
 
@@ -626,8 +623,9 @@ class MSSQLDB(DB):
     """
     Utility for exploring and querying a Microsoft SQL database. (WIP)
     """
-    def __init__(self, username, password, hostname, dbname, port=1433,
-                 driver='pymssql', echo=False):
+    def __init__(self, username, password, hostname, dbname, schema_name="dbo",
+                 port=1433, driver='pymssql', echo=False):
+        self.schema_name = schema_name
         super(MSSQLDB, self).__init__(
             username=username,
             password=password,
@@ -636,14 +634,16 @@ class MSSQLDB(DB):
             dbtype="mssql",
             driver=driver,
             echo=echo)
-        self.sql("USE {{dbname}};", {"dbname": dbname})
 
-        _ = self.table_names  # Establishes connection I guess...
+        # Uh, doing this twice actually prevents a ProgrammingError... weird.
+        self.sql("USE {{dbname}};", {"dbname": dbname})
+        self.sql("USE {{dbname}};", {"dbname": dbname})
 
     @property
     def table_names(self):
-        return self.sql(
+        raw_names = self.sql(
             "SELECT TABLE_NAME "
             "FROM {{dbname}}.INFORMATION_SCHEMA.TABLES "
             "WHERE TABLE_TYPE = 'BASE TABLE'",
             {"dbname": self.dbname})["TABLE_NAME"].tolist()
+        return ["{}.{}".format(self.schema_name, name) for name in raw_names]

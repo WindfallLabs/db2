@@ -81,6 +81,7 @@ class SpatiaLiteDB(SQLiteDB):
             # NOTE: Use SQLAlchemy rather than the DB API con
             # Source: geoalchemy2 readthedocs tutorial
             self.engine.execute(select([func.InitSpatialMetaData(1)]))
+            self.schema.refresh()
 
     def has_srid(self, srid):
         """
