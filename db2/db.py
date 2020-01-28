@@ -22,7 +22,7 @@ import pandas as pd
 import pybars
 import sqlparse
 from pymssql import OperationalError
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, MetaData
 from sqlalchemy.event import listen
 from sqlalchemy.exc import ResourceClosedError
 from sqlalchemy.ext.declarative import declarative_base
@@ -123,12 +123,13 @@ class DB(object):
         # Create engine
         self.engine = create_engine(self._url)
 
-        # Get DBAPI connection and cursor objects on connect
+        # Access DBAPI connection on connect
         listen(self.engine, 'connect', self._on_connect)
         # Connect
         self.con = self.engine.connect()  # Also creates self.con
-        # DBAPI Cursor
-        #self.cur = self.con.cursor()
+        # Get metadata object for accessing schema
+        self.meta = MetaData()
+        self.meta.reflect(bind=self.engine)
 
         # Create session (WIP)
         self.session = sessionmaker(bind=self.engine)()
@@ -194,6 +195,10 @@ class DB(object):
         Returns a list of tables in the database.
         """
         return self.engine.table_names()
+
+    def get_schema(self):
+        raise(NotImplementedError(
+            'This is an abstract method intended to be overwritten'))
 
     def get_table_mapping(self, table_name):
         """
@@ -363,6 +368,7 @@ class DB(object):
 
     @_concat_dfs
     def sql(self, sql, data=None, union=False):
+        # This is ugly, but if it ain't broke, it don't need fixin'
         # Apply handlebars to single statement
         many = False
         if isinstance(data, dict) and "{{" in sql:
@@ -399,11 +405,9 @@ class DB(object):
                 print(sql)
             rprox = self.engine.execute(sql)
 
-        try:
-            # Get column names from cursor
-            columns = rprox.keys()
-        except (TypeError, AttributeError):
-            # If the SQL doesn't return column names in the cursor.description
+        # Get column names
+        columns = rprox.keys()
+        if len(columns) == 0:
             columns = ["SQL", "Result"]
 
         # Get the results

@@ -77,9 +77,6 @@ class ImportTests_Memory(unittest.TestCase):
         self.assertTrue("wild" in d.table_names)
         self.assertEqual(r.iloc[0][0], 742)
 
-    #def test_import_dbf(self):
-    #    pass
-
 
 class ImportTests_OnDisk(unittest.TestCase):
     def setUp(self):

@@ -5,9 +5,11 @@ Misc functions and helpers.
 
 from __future__ import unicode_literals
 
+import inspect
+import re
 from dateutil.parser import parse as parse_date
 from decimal import Decimal
-import inspect
+
 
 import pandas as pd
 import sqlparse
@@ -98,7 +100,7 @@ def make_sqlite_function(conn, func):
         num_args = len(inspect.getfullargspec(func).args)
     except AttributeError:
         num_args = len(inspect.getargspec(func).args)
-    conn.create_function(name, num_args, func)        
+    conn.create_function(name, num_args, func)
     return
 
 
@@ -143,3 +145,140 @@ def pystrftime(directive, timestring):
     .. _datetime: https://docs.python.org/2/library/datetime.html#strftime-and-strptime-behavior
     """
     return parse_date(timestring).strftime(directive)
+
+
+
+from prettytable import PrettyTable
+from sqlalchemy import MetaData
+
+'''
+sql = d.sql("SELECT * FROM sqlite_master WHERE type='table' and name='Album'")[
+    "sql"].iloc[0]
+
+rgx = "FOREIGN KEY \(\[(.*)\]\) REFERENCES \[(.*)\] \(\[(.*)\]\)"
+
+column_name, foreign_table, foreign_key = re.findall(rgx, sql)[0]
+
+self.assertEqual(column_name, "ArtistId")
+self.assertEqual(foreign_key, "ArtistId")
+self.assertEqual(foreign_table, "Artist")
+'''
+
+
+def df_to_prettytable(df, name=None):
+    pt = prettytable.PrettyTable(df.columns.tolist())
+    for row in df.itertuples(index=False):
+        pt.add_row(list(row))
+
+    # Add name
+    if name:
+        r = str(pt).split('\n')[0]
+        brk = "+" + "-" * (len(r) - 2) + "+"
+        title = "|" + name.center(len(r) - 2) + "|"
+        pt = (brk + "\n" + title + "\n" + str(pt))
+    return str(pt)
+
+
+"""
++------------------------------------------------------------------------+
+|                                 Track                                  |
++--------------+----------------+-----------------------+----------------+
+|   Columns    |      Type      |      Foreign Keys     | Reference Keys |
++--------------+----------------+-----------------------+----------------+
+|   TrackId    |    INTEGER     |                       |                |
+|     Name     | NVARCHAR(200)  |                       |                |
+|   AlbumId    |    INTEGER     |     Album.AlbumId     |                |
+| MediaTypeId  |    INTEGER     | MediaType.MediaTypeId |                |
+|   GenreId    |    INTEGER     |     Genre.GenreId     |                |
+|   Composer   | NVARCHAR(220)  |                       |                |
+| Milliseconds |    INTEGER     |                       |                |
+|    Bytes     |    INTEGER     |                       |                |
+|  UnitPrice   | NUMERIC(10, 2) |                       |                |
++--------------+----------------+-----------------------+----------------+
+"""
+
+'''
+def get_reference(target_table):
+    refs = []
+    for name in d.table_names:
+        schema = make_table_schema(name)
+        schema.apply(
+            lambda x: refs.append("{}.{}".format(name, x["Column"]))
+            if target_table in x["Foreign Key"] else '', axis=1)
+    return ", ".join(refs)
+
+
+def make_table_schema(table_name):
+    cols = ["Column", "Type", "Foreign Key", "Reference Keys"]
+    schema = pd.DataFrame([], columns=cols)
+
+    target = d.meta.tables[table_name]
+
+    for column in target.columns:
+        fkeys = list(column.foreign_keys)
+        for_key = ""
+        if fkeys:
+            for_key = fkeys[0].target_fullname
+        ref_key = ""  # TODO:
+
+        # print("{} {} {}".format(column.name, column.type, fkey))
+        row = pd.DataFrame([
+            [column.name,
+             column.type,
+             for_key,
+             ref_key]],
+            columns=cols)
+        schema = schema.append(row)
+    return schema.reset_index(drop=True)
+
+
+
+schema = make_table_schema("Album")
+print(df_to_prettytable(schema, name="Album"))
+"""
++-------------------------------------------------------------+
+|                            Track                            |
++----------+---------------+-----------------+----------------+
+|  Column  |      Type     |   Foreign Key   | Reference Keys |
++----------+---------------+-----------------+----------------+
+| AlbumId  |    INTEGER    |                 |                |
+|  Title   | NVARCHAR(160) |                 |                |
+| ArtistId |    INTEGER    | Artist.ArtistId |                |
++----------+---------------+-----------------+----------------+
+"""
+
+
+.cached_schema
+
+.refresh_schema()
+
+
+def make_reference_table():
+    ref_cols = ["Table", "Primary Key", "Foreign Table", "Foreign Key"]
+    reference_keys = pd.DataFrame([], columns=ref_cols)
+    for tbl in d.table_names:  # self
+        obj = d.meta.tables[tbl]  # self.meta
+        row = [(obj.fullname,) + tuple(i.target_fullname.split(".")) for i in
+               obj.foreign_keys]
+        reference_keys = reference_keys.append(
+            pd.DataFrame(row, columns=ref_cols))
+    return reference_keys.reset_index(drop=True)
+
+
+a = d.meta.tables["Track"]
+[[re.findall("'(.*?)'", i.columns.__str__())[0], i.elements[0].target_fullname] for i in a.foreign_key_constraints]
+
+ref = make_reference_table()
+
+
+get_reference("Album")
+
+# Album.AlbumId is ref'd by Track.AlbumId, and others
+track = make_table_schema("Track")
+album = make_table_schema("Album")
+
+ref = make_reference_table()
+make_table_schema("Album")
+ref[ref["Table"] == "Album"]
+ref[ref["Foreign Table"] == "Album"]
+'''

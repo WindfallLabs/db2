@@ -5,6 +5,8 @@ Test db module
 
 import unittest
 
+import pandas as pd
+
 from db2 import DB, SQLiteDB
 
 
@@ -53,7 +55,7 @@ class TestSQL(unittest.TestCase):
             "CREATE TABLE test (id INT PRIMARY KEY, name TEXT NOT NULL); ")
 
     def create_test_table(self):
-        self.d.engine.execute(
+        return self.d.sql(
             "CREATE TABLE test (id INT PRIMARY KEY, name TEXT NOT NULL);")
 
     def test_select_empty_dataframe(self):
@@ -62,6 +64,20 @@ class TestSQL(unittest.TestCase):
         r = self.d.sql("SELECT * FROM test")
         self.assertEqual(r.columns.tolist(), ["id", "name"])
         self.assertTrue(r.empty)
+
+    def test_select_not_empty_dataframe(self):
+        # A create statement
+        c = self.create_test_table()
+        self.assertTrue(not c.empty)
+        # An insert statement
+        one = self.d.sql("INSERT INTO test VALUES (1, 'One');")
+        self.assertTrue(not one.empty)
+        # A select statement
+        r = self.d.sql("SELECT * FROM test")
+        self.assertEqual(r.columns.tolist(), ["id", "name"])
+        self.assertTrue(not r.empty)
+        self.assertEqual(r["id"].iloc[0], 1)
+        self.assertEqual(r["name"].iloc[0], "One")
 
     def test_executemany_novars(self):
         self.create_test_table()
@@ -148,6 +164,26 @@ class TestSQL(unittest.TestCase):
         r = d.sql(q, data, union=True)
         self.assertEqual(r.columns.tolist(), ["table_name", "cnt"])
         self.assertEqual(r["cnt"].sum(), 4125)
+
+    def test_sql_create_results(self):
+        self.create_test_table()
+        # Executing two statements produces a two row dataframe
+        one = self.d.sql("INSERT INTO test VALUES (1, 'One');")
+        self.assertEqual(one.columns.tolist(), ["SQL", "Result"])
+        self.assertEqual(one["Result"].iloc[0], 1)
+
+        # Executing two statements produces a two row dataframe
+        two = self.d.sql("INSERT INTO test VALUES (2, 'Two'); "
+                         "INSERT INTO test VALUES (3, 'Three');")
+        self.assertEqual(len(two), 2)
+        # First row
+        self.assertEqual(
+            two["SQL"].iloc[0], "INSERT INTO test VALUES (2, 'Two'); ")
+        self.assertEqual(two["Result"].iloc[0], 1)
+        # Second row
+        self.assertEqual(
+            two["SQL"].iloc[1], "INSERT INTO test VALUES (3, 'Three');")
+        self.assertEqual(two["Result"].iloc[0], 1)
 
 
 class TestDatabaseURLs(unittest.TestCase):
