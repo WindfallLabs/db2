@@ -71,13 +71,17 @@ class ImportTests_Memory(unittest.TestCase):
                    "FROM wild")).iloc[0]["IsValid(geometry)"], 1)
 
     def test_import_shp(self):
-        os.environ["SPATIALITE_SECURITY"] = "relaxed"  # TODO: rm
         d = sdb.SpatiaLiteDB(":memory:")
         r = d.import_shp(WILDERNESS, "wild", srid=4326)
         self.assertTrue("wild" in d.table_names)
         self.assertEqual(r.columns.tolist(), ["SQL", "Result"])
         self.assertEqual(r["Result"].iat[0], 742)
 
+    def test_get_geom_data(self):
+        d = sdb.SpatiaLiteDB(":memory:")
+        d.import_shp(WILDERNESS, "wild", srid=4326)
+        self.assertEqual(d.get_geometry_data("wild")["srid"], 4326)
+        self.assertEqual(d.get_geometry_data("wild")["ref_sys_name"], "WGS 84")
 
 class ImportTests_OnDisk(unittest.TestCase):
     def setUp(self):

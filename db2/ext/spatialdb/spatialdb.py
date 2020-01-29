@@ -24,6 +24,7 @@ import geopandas as gpd
 import pandas as pd
 import shapely.wkt
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from db2 import SQLiteDB
 from ._utils import get_sr_from_web, SpatiaLiteBlobElement
@@ -401,14 +402,14 @@ class SpatiaLiteDB(SQLiteDB):
         with related records in the ``spatial_ref_sys`` table.
         """
         return self.sql(
-            ("SELECT * FROM geometry_columns g "
+            ("SELECT g.*, s.ref_sys_name, s.auth_name, s.proj4text "
+             "FROM geometry_columns g "
              "LEFT JOIN spatial_ref_sys s "
              "ON g.srid=s.srid"))
 
     def get_geometry_data(self, table_name):
         """Dictionary of geometry column data by f_table_name."""
-        return self.geometries.set_index(
-            "f_table_name").T.to_dict()[table_name]
+        return self.geometries.set_index("f_table_name").loc[table_name]
 
     def alter_geometry(self, table_name, srid="SAME", geom_type="SAME",
                        dims="SAME", not_null="SAME"):
@@ -494,7 +495,7 @@ class SpatiaLiteDB(SQLiteDB):
             "  {{ srid }}, '{{ geom_type }}', '{{ dims }}', {{ not_null }});\n"
             # Update altered geometry
             "UPDATE {{ table_name }}_bk "
-            "  SET geometry = (SELECT MakeValid({{ funcs }}) "
+            "  SET geometry = (SELECT {{ funcs }} "
             "  FROM {{ table_name }} "
             "  WHERE {{ table_name }}_bk.rowid={{ table_name }}.rowid);\n"
             # Drop original table
@@ -508,7 +509,11 @@ class SpatiaLiteDB(SQLiteDB):
             "VACUUM;"
             )
         # TODO: self.sql(scripts.alter_geometry, data)
-        return self.sql(script, data)
+        try:
+            return self.sql(script, data)
+        except IntegrityError as e:
+            print(self._apply_handlebars(script, data))
+            raise e
 
     def __str__(self):
         return "SpatialDB[SQLite/SpatiaLite] > {dbname}".format(

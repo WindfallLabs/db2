@@ -127,10 +127,7 @@ class DB(object):
         # Access DBAPI connection on connect
         listen(self.engine, 'connect', self._on_connect)
         # Connect
-        self.con = self.engine.connect()  # Also creates self.con
-        # Get metadata object for accessing schema
-        #self.meta = MetaData(bind=self.engine)
-        #self.meta.reflect(bind=self.engine)
+        self.con = self.engine.connect()
         self.schema = Schema(self)
 
         # Misc
@@ -170,7 +167,7 @@ class DB(object):
 
     def _on_connect(self, conn, _):
         """Get DBAPI2 Connection."""
-        setattr(self, "con", conn)
+        #setattr(self, "con", conn)
         return
 
     @property
@@ -537,6 +534,7 @@ class SQLiteDB(DB):
 
     def _on_connect(self, conn, _):
         """Get DBAPI2 Connection and load all specified extensions."""
+        conn.isolation_level = None
         conn.enable_load_extension(True)
         if isinstance(self._extensions, list):
             for ext in self._extensions:
