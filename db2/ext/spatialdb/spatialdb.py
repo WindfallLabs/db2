@@ -311,7 +311,6 @@ class SpatiaLiteDB(SQLiteDB):
             raise SpatiaLiteError("export failed")
         return df
 
-
     def get_spatial_ref_sys(self, srid, auth="esri"):
         """
         Execute the INSERT statement for the spatial reference data from
@@ -407,9 +406,9 @@ class SpatiaLiteDB(SQLiteDB):
              "ON g.srid=s.srid"))
 
     def get_geometry_data(self, table_name):
-        """(WIP)."""
-        return self.geometries[self.geometries["f_table_name"] == table_name
-                               ].iloc[0].to_dict()
+        """Dictionary of geometry column data by f_table_name."""
+        return self.geometries.set_index(
+            "f_table_name").T.to_dict()[table_name]
 
     def __str__(self):
         return "SpatialDB[SQLite/SpatiaLite] > {dbname}".format(

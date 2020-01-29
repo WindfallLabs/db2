@@ -75,7 +75,8 @@ class ImportTests_Memory(unittest.TestCase):
         d = sdb.SpatiaLiteDB(":memory:")
         r = d.import_shp(WILDERNESS, "wild", srid=4326)
         self.assertTrue("wild" in d.table_names)
-        self.assertEqual(r.iloc[0][0], 742)
+        self.assertEqual(r.columns.tolist(), ["SQL", "Result"])
+        self.assertEqual(r["Result"].iat[0], 742)
 
 
 class ImportTests_OnDisk(unittest.TestCase):
@@ -88,11 +89,12 @@ class ImportTests_OnDisk(unittest.TestCase):
         # os.remove(self.path) causes WindowsError, fine on Linux
         pass
 
-    def test_importshp(self):
+    def test_import_shp(self):
         self.d = sdb.SpatiaLiteDB(self.path)
         r = self.d.import_shp(WILDERNESS, "wild", srid=4326)
         self.assertTrue("wild" in self.d.table_names)
-        self.assertEqual(r.iloc[0][0], 742)
+        self.assertEqual(r.columns.tolist(), ["SQL", "Result"])
+        self.assertEqual(r["Result"].iat[0], 742)
 
 
 '''

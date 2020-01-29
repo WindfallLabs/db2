@@ -363,6 +363,13 @@ class DB(object):
                     [s for s in parsed if utils.is_query(s)][0])]
             except IndexError:
                 pass
+
+            ix = 0
+            for df in dfs:
+                if df.columns.tolist() != ["SQL", "Result"]:
+                    dfs[ix] = df.T.reset_index().rename(
+                        {"index": "SQL", 0: "Result"}, axis=1)
+                ix += 1
             return pd.concat(dfs).reset_index(drop=True)
         return sql_wrapper
 
@@ -421,9 +428,9 @@ class DB(object):
             # If columns weren't returned
             if columns == ["SQL", "Result"]:
                 if many is True:
-                    results = [[sql, len(data)]]
+                    results = [[sql.strip(), len(data)]]
                 else:
-                    results = [[sql, 1]]
+                    results = [[sql.strip(), 1]]
             # SQL returned an empty table
             else:
                 results = None
@@ -577,6 +584,12 @@ class SQLiteDB(DB):
             self.databases[self.databases["name"] == name].index,
             inplace=True)
         return 1
+
+    def create_index(self, table_name, column_name):
+        """Creates an index on table.column."""
+        s = "CREATE INDEX idx_{{ tbl }}_{{ col }} ON {{ tbl }} ({{ col }});"
+        data = {"tbl": table_name, "col": column_name}
+        return self.sql(s, data)
 
     def create_table_as(self, table_name, sql, **kwargs):  # TODO: add tests
         """

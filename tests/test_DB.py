@@ -3,6 +3,8 @@
 Test db module
 """
 
+from __future__ import unicode_literals
+
 import unittest
 
 import pandas as pd
@@ -190,7 +192,7 @@ class TestSQL(unittest.TestCase):
         self.assertEqual(len(two), 2)
         # First row
         self.assertEqual(
-            two["SQL"].iloc[0], "INSERT INTO test VALUES (2, 'Two'); ")
+            two["SQL"].iloc[0], "INSERT INTO test VALUES (2, 'Two');")
         self.assertEqual(two["Result"].iloc[0], 1)
         # Second row
         self.assertEqual(
