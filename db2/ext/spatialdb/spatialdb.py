@@ -410,6 +410,106 @@ class SpatiaLiteDB(SQLiteDB):
         return self.geometries.set_index(
             "f_table_name").T.to_dict()[table_name]
 
+    def alter_geometry(self, table_name, srid="SAME", geom_type="SAME",
+                       dims="SAME", not_null="SAME"):
+        """
+        Replaces an existing table with one with altered geometry column
+        properties.
+        This method executes an SQL script that can be used to reproject data,
+        convert coordinates to XY, enforce/relax NOT NULL constraints, and
+        convert to single/multi geometry (WIP).
+
+        Parameters
+        ----------
+        table_name: str
+            The name of the table with geometry to alter.
+        srid: int (default: "SAME")
+            The spatial reference id to transform/reproject geometry to
+        geom_type: str (default: "SAME")
+            WIP - this will change to single/multi the input table geoms
+        dims: str ({"XY", "XYZ", "XYM", "XYZM"}, default: "SAME")
+            The dimension to cast coordinates to
+        not_null: book (default: "SAME")
+            WIP - Should inherit the existing table's NOT NULL constraint
+        """
+        # Validate parameters
+        if set([srid, geom_type, dims, not_null]) == {"SAME"}:
+            raise AttributeError("No changes will be made")
+        if table_name not in self.geometries["f_table_name"].tolist():
+            raise AttributeError("Not a spatial table")
+        if dims not in ("SAME", "XY", "XYZ", "XYM", "XYZM"):
+            raise AttributeError("Not a valid dimension")
+
+        if srid == "SAME":
+            srid = int(self.get_geometry_data(table_name)["srid"])
+            transform = None
+        else:
+            if not isinstance(srid, int):
+                raise AttributeError("SRID must be an int")
+            # NOTE: str format; not an inject threat since srid must be int
+            transform = "ST_Transform(geometry, {})".format(srid)
+
+        if geom_type == "SAME":  # TODO: geom_type should just be multi/single
+            geom_type = self.sql(
+                "SELECT DISTINCT GeometryType(geometry) AS dims "
+                "FROM ufda_regions")["dims"].iat[0].split(" ")[0]
+
+        if dims == "SAME":
+            dims = self.sql("SELECT DISTINCT CoordDimension(geometry) AS dims "
+                            "FROM {{ table_name }}")["dims"].iat[0]
+            cast_dims = None
+        else:
+            # NOTE: str format; not an injection threat since dims are in list
+            cast_dims = "CastTo{0}(geometry)".format(dims)
+
+        #if not_null == "SAME":  # TODO:
+        not_null = 1
+
+        if transform and cast_dims:
+            funcs = transform.replace("geometry", cast_dims)
+        elif not transform and not cast_dims:
+            funcs = "geometry"  # TODO: geom_type
+        else:
+            funcs = transform or cast_dims
+
+        data = {
+            "table_name": table_name,
+            "srid": srid,
+            "geom_type": geom_type,
+            "dims": dims,
+            "not_null": not_null,
+            "funcs": funcs}
+
+        # TODO: in future version move this to .sql file in new /scripts folder
+        script = (
+            # CloneTable (try to drop first)
+            "SELECT DropGeoTable('{{ table_name }}_bk')"
+            ";\n"
+            "SELECT "
+            "  CloneTable('main', '{{ table_name }}', '{{ table_name }}_bk', "
+            "  1, '::ignore::geometry');\n"
+            # AddGeometryColumn
+            "SELECT "
+            "  AddGeometryColumn('{{ table_name }}_bk', 'geometry', "
+            "  {{ srid }}, '{{ geom_type }}', '{{ dims }}', {{ not_null }});\n"
+            # Update altered geometry
+            "UPDATE {{ table_name }}_bk "
+            "  SET geometry = (SELECT MakeValid({{ funcs }}) "
+            "  FROM {{ table_name }} "
+            "  WHERE {{ table_name }}_bk.rowid={{ table_name }}.rowid);\n"
+            # Drop original table
+            "SELECT DropGeoTable('{{ table_name }}');\n"
+            # Clone new table into original name
+            "SELECT "
+            "  CloneTable('main', '{{ table_name }}_bk', '{{ table_name }}', "
+            "  1);\n"
+            # Drop _bk table
+            "SELECT DropGeoTable('{{ table_name }}_bk');"
+            "VACUUM;"
+            )
+        # TODO: self.sql(scripts.alter_geometry, data)
+        return self.sql(script, data)
+
     def __str__(self):
         return "SpatialDB[SQLite/SpatiaLite] > {dbname}".format(
             dbname=self.dbname)
