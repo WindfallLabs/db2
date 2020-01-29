@@ -323,7 +323,7 @@ class DB(object):
 
     def _concat_dfs(sqlfunc):
         """Decorates DB.sql()."""
-        def sql_wrapper(d, sql, data=None, union=False):
+        def sql_wrapper(d, sql, data=None):
             """
             Executes one or more SQL statements.
 
@@ -344,12 +344,13 @@ class DB(object):
                 echo of the statement and number of successful operations.
             """
             dfs = []
-            # Allow UNIONing multiple statements iterated over data
-            if union:
-                sql = DB._apply_handlebars(sql, data, union=True)
-                return sqlfunc(d, sql)
-
             parsed = sqlparse.parse(sql)
+
+            # Identify a handlebars-style statement that needs to be UNIONed
+            if (len(parsed) == 1 and "{{" in sql
+                    and utils.is_query(parsed[0]) and ";" not in sql):
+                sql = d._apply_handlebars(sql, data, union=True)
+                return pd.read_sql(sql, d.engine)
 
             # Iterate over statements passed. Single statements that iterate
             # over data (executemany) will occur inside the sqlfunc
@@ -366,7 +367,7 @@ class DB(object):
         return sql_wrapper
 
     @_concat_dfs
-    def sql(self, sql, data=None, union=False):
+    def sql(self, sql, data=None):
         # This is ugly, but if it ain't broke, it don't need fixin'
         # Apply handlebars to single statement
         many = False

@@ -149,7 +149,7 @@ class TestSQL(unittest.TestCase):
         r = self.d.sql("SELECT * FROM test WHERE id > {{id}}", {"id": 2})
         self.assertTrue(r["name"].tolist() == ["Three"])
 
-    def test_sql_union(self):
+    def test_sql_union1(self):
         q = """
         SELECT '{{ name }}' as table_name, sum(1) as cnt
         FROM {{ name }}
@@ -161,9 +161,21 @@ class TestSQL(unittest.TestCase):
             {"name": "Track"}
         ]
         d = SQLiteDB(CHINOOK)
-        r = d.sql(q, data, union=True)
+        r = d.sql(q, data)
         self.assertEqual(r.columns.tolist(), ["table_name", "cnt"])
         self.assertEqual(r["cnt"].sum(), 4125)
+
+    def test_sql_union2(self):
+        favorites = ["Eric Clapton", "Led Zeppelin", "Jimi Hendrix", "AC/DC"]
+        fav_data = [{"fav": band} for band in favorites]
+        q = ("SELECT a.Name AS Band, COUNT(b.Title) AS Albums "
+             "FROM Artist a "
+             "LEFT JOIN Album b "
+             "    ON a.ArtistId=b.ArtistId WHERE a.Name = '{{ fav }}'")
+        d = SQLiteDB(CHINOOK)
+        r = d.sql(q, fav_data)
+        self.assertEqual(r.columns.tolist(), ["Band", "Albums"])
+        self.assertEqual(r[r["Band"] == "Led Zeppelin"]["Albums"].iat[0], 14)
 
     def test_sql_create_results(self):
         self.create_test_table()

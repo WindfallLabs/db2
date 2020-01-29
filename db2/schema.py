@@ -57,6 +57,10 @@ class TableSchema(object):
     def head(self):
         return self.all().head()
 
+    def pretty(self):
+        print(self.__str__())
+        return
+
     @property
     def columns(self):
         return [c.name for c in self.Table.columns]

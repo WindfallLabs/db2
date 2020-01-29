@@ -64,7 +64,7 @@ def get_sr_from_web(srid, auth, sr_format):
     return data
 
 
-
+# TODO: Errors on geometries with Z and/or M values
 class SpatiaLiteBlobElement(object):
     """
     SpatiaLite Blob Element

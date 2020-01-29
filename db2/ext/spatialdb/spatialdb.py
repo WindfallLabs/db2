@@ -132,6 +132,8 @@ class SpatiaLiteDB(SQLiteDB):
         Any other kwargs are passed to the 'to_sql()' method of the dataframe.
             Note that the 'index' argument is set to False.
         """
+        # Put the if_exists param in kwargs (passed to df.to_sql())
+        kwargs.update({"if_exists": if_exists})
         # TODO: check_security()
         rcols = ["SQL", "Result"]
         r = pd.DataFrame(columns=rcols)
