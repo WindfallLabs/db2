@@ -5,8 +5,11 @@ Misc functions and helpers.
 
 from __future__ import unicode_literals
 
+import base64
 import inspect
+import json
 import re
+import os
 from dateutil.parser import parse as parse_date
 from decimal import Decimal
 
@@ -23,12 +26,16 @@ import db2
 # =============================================================================
 
 def sqlite_adapt_datetime(date_time):
-    """Adapts ``datetime.datetime`` types to SQLite TEXT with."""
+    """
+    Adapts ``datetime.datetime`` types to SQLite TEXT with.
+    """
     return date_time.strftime(db2.options["sqlite_datetime_format"])
 
 
 def sqlite_adapt_decimal(decimal):
-    """Adapts ``decimal.Decimal`` types to FLOAT."""
+    """
+    Adapts ``decimal.Decimal`` types to FLOAT.
+    """
     return float(decimal)
 
 
@@ -50,6 +57,17 @@ def decimals_to_floats(col):
     Converts all DataFrame Series of decimal.Decimal types to floats.
 
     NOTE: SQLite automatically handles this on INSERT with ``adapt_decimals``.
+
+    Example
+    -------
+    >>> from decimal import Decimal
+    >>> import pandas as pd
+    >>> from db2.utils import decimals_to_floats
+    >>> df = pd.DataFrame([[Decimal(2.0)], [Decimal(1.0)]], columns=["D"])
+    >>> assert df["D"].tolist() == [Decimal(2.0), Decimal(1.0)]
+    >>> converted = decimals_to_floats(df)
+    >>> converted["D"].tolist() == [2.0, 1.0]
+    True
     """
     if any(set(col.apply(lambda x: isinstance(x, Decimal)))):
         return pd.to_numeric(col)
@@ -74,6 +92,15 @@ def is_query(parsed_sql):
     bool
         True if statement type is SELECT and the second non-whitespace token is
         not a function.
+
+    Example
+    -------
+    >>> import sqlparse
+    >>> from db2.utils import is_query
+    >>> p = sqlparse.parse(
+    ...     "SELECT * FROM sqlite_master WHERE type='table'")
+    >>> is_query(p[0])
+    True
     """
     tokens = [t for t in parsed_sql.tokens if not t.is_whitespace]
     return parsed_sql.get_type() == "SELECT" and not type(
@@ -121,18 +148,16 @@ def pystrftime(directive, timestring):
 
     Example
     -------
-    .. code-block:: python
+    # Use as a Python function
+    >>> pystrftime("%b", "2020-01-01")
+    'Jan'
 
-        # Use as a Python function
-        >>> pystrftime("%b", "2020-01-01")
-        'Jan'
-
-        # Use as an SQL function
-        >>> from db2 import SQLiteDB, utils
-        >>> d = SQLiteDB(":memory:", functions=[utils.pystrftime])
-        >>> month = d.sql("SELECT pystrftime('%b', '2020-01-01') AS abbr;")
-        >>> month["abbr"].iat[0]
-        u'Jan'
+    # Use as an SQL function
+    >>> from db2 import SQLiteDB, utils
+    >>> d = SQLiteDB(":memory:", functions=[utils.pystrftime])
+    >>> month = d.sql("SELECT pystrftime('%b', '2020-01-01') AS abbr;")
+    >>> month["abbr"].iat[0]
+    u'Jan'
 
 
     Also see SQLite_ and datetime_ references.
@@ -186,3 +211,28 @@ def df_to_prettytable(df, name=None):
         title = "|" + name.center(len(r) - 2) + "|"
         pt = (brk + "\n" + title + "\n" + str(pt))
     return "\n{}\n".format(str(pt))
+
+
+class ProfileHandler:
+    # ProfileHandler.load("/path/to/my/profile.json")
+    # ms = db2.MSSQLDB(profile="/path/to/my/profile")
+    @staticmethod
+    def load(profile_path):
+        if not os.path.exists(profile_path):
+            raise AttributeError("File does not exist")
+        with open(profile_path, "r") as f:
+            return json.loads(ProfileHandler.decode(f.read()))
+
+    @staticmethod
+    def save(profile_path, data):
+        with open(profile_path, "w") as f:
+            f.write(ProfileHandler.encode(data))
+        return
+
+    @staticmethod
+    def encode(data):
+        return base64.b64encode(json.dumps(data).encode("utf-8"))
+
+    @staticmethod
+    def decode(data):
+        return base64.b64decode(data).decode("utf-8")

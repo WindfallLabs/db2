@@ -22,11 +22,10 @@ import pandas as pd
 import pybars
 import sqlparse
 from pymssql import OperationalError
-from sqlalchemy import create_engine, MetaData
+from sqlalchemy import create_engine
 from sqlalchemy.event import listen
 from sqlalchemy.exc import ResourceClosedError
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
 
 import utils
 from schema import Schema
@@ -92,8 +91,6 @@ class DB(object):
         Specify the encoding.
     echo: bool
         Whether or not to repeat queries and messages back to user
-    extensions: list
-        List of SQLite extensions to load on connection
     """
     def __init__(self, url=None, username=None, password=None, hostname=None,
                  port=None, dbname=None, dbtype=None, driver=None,
@@ -103,9 +100,9 @@ class DB(object):
         # Credentials
         # TODO: copy over db.py's utils.py for profile save/load handling
         self.credentials = {
-                "user": username,
-                "pwd": password,
-                "host": hostname,
+                "username": username,
+                "password": password,
+                "hostname": hostname,
                 "port": ":{}".format(port) if port else None,
                 "dbname": dbname,
                 "dbtype": str(dbtype).lower() if dbtype else None,
@@ -143,13 +140,16 @@ class DB(object):
         Example
         -------
         >>> DB._create_url(**{
-        ...     "dbtype": "postgres", "user": "test_user",
-        ...     "pwd": "my$tr0ngPWD", "host": "localhost", "port": 8080,
-        ...     "dbname": "students", "driver": None})
-        'postgres://test_user:my$tr0ngPWD@localhost:8080/students'
+        ...     "dbtype": "postgres", "username": "test_user",
+        ...     "password": "my$tr0ngPWD", "hostname": "localhost",
+        ...     "port": 8080, "dbname": "students", "driver": None})
+        u'postgres://test_user:my$tr0ngPWD@localhost:8080/students'
         """
         # URL template
-        temp = "{dbtype}{driver}://{user}:{pwd}@{host}{port}/{dbname}"
+        temp = ("{dbtype}{driver}://{username}:{password}"
+                "@{hostname}{port}/{dbname}")
+        ms_temp = ("mssql+{driver}://{username}:{password}"
+                   "@{hostname}/?charset=utf8")
 
         kwargs.setdefault("driver")
 
@@ -158,8 +158,7 @@ class DB(object):
             return "sqlite:///{}".format(kwargs["dbname"])
         # MSSQL
         elif kwargs["dbtype"] == "mssql":
-            return "mssql+{driver}://{user}:{pwd}@{host}/?charset=utf8".format(
-                **kwargs)
+            return ms_temp.format(**kwargs)
         # Others
         kwargs = {k: v if v else "" for k, v in kwargs.items()}
         kwargs["port"] = ":{}".format(kwargs["port"]) if kwargs["port"] else ""
@@ -207,14 +206,15 @@ class DB(object):
 
         Example
         -------
+        >>> from db2 import DB
         >>> d = DB(dbname=":memory:", dbtype="sqlite")
         >>> d.engine.execute("CREATE TABLE Artist (ArtistId INT PRIMARY KEY, Name TEXT);") # doctest:+ELLIPSIS
         <sqlalchemy.engine.result.ResultProxy object at 0x...>
-        >>> Artist = d.get_table_mapping("Artist")
-        >>> Artist
+        >>> Artist = d.get_table_mapping(r"Artist")  # doctest: +SKIP
+        >>> Artist  # doctest: +SKIP
         <class 'db.Artist'>
-        >>> d.insert([Artist(ArtistId=1, Name="AC/DC")])
-        >>> assert d.engine.execute("SELECT * FROM Artist").fetchall() == [(1, "AC/DC")]
+        >>> d.insert([Artist(ArtistId=1, Name="AC/DC")])  # doctest: +SKIP
+        >>> assert d.engine.execute("SELECT * FROM Artist").fetchall() == [(1, "AC/DC")]  # doctest: +SKIP
         """
         if table_name not in self.table_names:
             raise AttributeError("target table '{}' does not exist".format(
@@ -302,6 +302,22 @@ class DB(object):
         -------
         str:
             The cleaned SQL statement(s).
+
+        Example
+        -------
+        >>> from db2 import DB
+        >>> sql = '''/* this is a script where comments will be removed */
+        ... SELECT * --this comment will be removed
+        ... FROM sqlite_master /* and so will this */ WHERE type='table'
+        ... ;'''
+        >>> print(DB.clean_sql(sql))  # doctest: +NORMALIZE_WHITESPACE
+        SELECT *
+        FROM sqlite_master  WHERE type='table'
+        ;
+        >>> print(DB.clean_sql(sql, reindent=True))
+        SELECT *
+        FROM sqlite_master
+        WHERE type='table' ;
         """
         # Remove comments
         if rm_comments:
@@ -476,7 +492,7 @@ class DB(object):
             Passed to ``df.to_sql()``
         """
         kwargs.setdefault("index", False)
-        # TODO: enforce datatypes and column name requirements
+        # TODO: column name requirements
 
         df.to_sql(table_name, self.engine, **kwargs)
         return
@@ -636,7 +652,8 @@ class MSSQLDB(DB):
     Utility for exploring and querying a Microsoft SQL database. (WIP)
     """
     def __init__(self, username, password, hostname, dbname, schema_name="dbo",
-                 port=1433, driver='pymssql', echo=False):
+                 port=1433, driver='pymssql', profile=None, echo=False):
+
         self.schema_name = schema_name
         super(MSSQLDB, self).__init__(
             username=username,

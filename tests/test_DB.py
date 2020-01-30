@@ -220,16 +220,16 @@ class TestDatabaseURLs(unittest.TestCase):
     def test_postgres(self):
         self.assertEqual(
             DB._create_url(**{
-                "dbtype": "postgres", "user": "dbread",
-                "pwd": "my$tr0ngPWD", "host": "localhost", "port": 8080,
-                "dbname": "chinook", "driver": None}),
+                "dbtype": "postgres", "username": "dbread",
+                "password": "my$tr0ngPWD", "hostname": "localhost",
+                "port": 8080, "dbname": "chinook", "driver": None}),
             "postgres://dbread:my$tr0ngPWD@localhost:8080/chinook")
 
     def test_mssql(self):
         self.assertEqual(
             DB._create_url(**{
-                "dbname": "chinook", "user": "dbread", "pwd": "my$tr0ngPWD",
-                "host": "localhost", "dbtype": "mssql",
-                "driver": 'pymssql'}),
+                "dbname": "chinook", "username": "dbread",
+                "password": "my$tr0ngPWD", "hostname": "localhost",
+                "dbtype": "mssql", "driver": 'pymssql'}),
             # Big string
             "mssql+pymssql://dbread:my$tr0ngPWD@localhost/?charset=utf8")

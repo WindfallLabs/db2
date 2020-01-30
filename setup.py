@@ -19,7 +19,11 @@ if sys.argv:
 
     # Calculate coverage stats
     elif sys.argv[1] == "coverage":
-        os.system("coverage run --source db2 -m py.test --doctest-glob=examples/*.rst; coverage html")
+        os.system("coverage erase")
+        c = ("coverage run --source=db2 -m pytest --doctest-modules "
+             "--doctest-glob='examples/*rst'")
+        os.system(c)
+        os.system("coverage html")
         # Open the index.html
         if any([arg in sys.argv for arg in ("-o", "--open")]):
             webbrowser.open("htmlcov/index.html")
