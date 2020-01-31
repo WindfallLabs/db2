@@ -189,7 +189,7 @@ class DB(object):
         Alias for ``self.engine.table_names()``
         Returns a list of tables in the database.
         """
-        return self.engine.table_names()
+        return sorted(self.engine.table_names())
 
     def get_schema(self):
         raise(NotImplementedError(
@@ -497,6 +497,53 @@ class DB(object):
         df.to_sql(table_name, self.engine, **kwargs)
         return
 
+    def export_tables_to_excel(self, tables, excel_path, where_clauses=None,
+                               strip_regex=None, **kwargs):
+        """
+        Exports a list of tables to sheets in an Excel document.
+
+        Parameters
+        ----------
+            tables: list
+                A list of tables to export as Excel sheets.
+            excel_path: str
+                Path to output '.xlsx' file.
+            where_clauses: list
+                A list of 'WHERE <clause>' or '' for each table.
+            strip_regex: str
+                A regular expression used to clean output sheet names.
+
+        Example
+        -------
+        >>> from tempfile import NamedTemporaryFile
+        >>> import pandas as pd
+        >>> import db2
+        >>> d = db2.SQLiteDB(":memory:")
+        >>> new_table = pd.DataFrame(
+        ...     [[0, 'AC/DC'], [1, 'Accept']], columns=["ArtistId", "Name"])
+        >>> d.load_dataframe(new_table, "Artist")
+        >>> # Note that we use a tempfile to test this example;
+        >>> # Regular users will almost certainly use a filepath here.
+        >>> excel_out = NamedTemporaryFile(suffix='.xlsx')
+        >>> d.export_tables_to_excel(
+        ...     ["Artist"], excel_out, ["WHERE ArtistId = 1"])
+        >>> excel_out.close()  # Delete the tempfile
+        """
+        writer = pd.ExcelWriter(excel_path, engine='xlsxwriter')
+        if not where_clauses:
+            where_clauses = [''] * len(tables)
+        tables = zip(tables, where_clauses)
+        for tbl, where in tables:
+            sheet_name = tbl
+            if strip_regex:
+                sheet_name = re.sub(strip_regex, "", sheet_name)
+            df = self.sql(
+                "SELECT * FROM {{ tbl }} {{ where }}",
+                data={"tbl": tbl, "where": where})
+            df.to_excel(writer, sheet_name=sheet_name, **kwargs)
+        writer.save()
+        return
+
     def create_mapping(self, mapping):
         """Creates a table from a mapping object."""
         mapping.__table__.create(self.engine)
@@ -504,6 +551,7 @@ class DB(object):
 
     def close(self):
         """Close the database connection."""
+        # TODO: after running this, on-disk SQLite databases are still locked
         self.engine.dispose()
         return
 
