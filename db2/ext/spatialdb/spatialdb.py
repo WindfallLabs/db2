@@ -174,20 +174,22 @@ class SpatiaLiteDB(SQLiteDB):
         # Recover geometry as a spatial column
         self.sql("SELECT RecoverGeometryColumn(?, ?, ?, ?);",
                  (table_name, "geometry", srid, geom_type))
+        # TODO: is this needed?
         if table_name not in self.geometries["f_table_name"].tolist():
             r = r.append(
-                pd.DataFrame([["RecoverGeometryColumn", 0]], columns=rcols))
+                pd.DataFrame([["RecoverGeometryColumn(?, ?, ?, ?)", 0]], columns=rcols))
         else:
             r = r.append(
-                pd.DataFrame([["RecoverGeometryColumn", 1]], columns=rcols))
+                pd.DataFrame([["RecoverGeometryColumn(?, ?, ?, ?)", 1]], columns=rcols))
         # Optionally validate geometries
         if validate:
-            r = r.append(self.sql("UPDATE {{tbl}} "
-                                  "SET geometry = MakeValid(geometry) "
-                                  "WHERE NOT IsValid(geometry);",
+            validate_sql = ("UPDATE {{tbl}} "
+                            "SET geometry = MakeValid(geometry) "
+                            "WHERE NOT IsValid(geometry);")
+            r = r.append(self.sql(validate_sql,
                                   data={"tbl": table_name}))
         r = r.append(
-            pd.DataFrame([["Load GeoDataFrame", len(gdf)]], columns=rcols))
+            pd.DataFrame([["load_geodataframe()", len(gdf)]], columns=rcols))
         return r.reset_index(drop=True)
 
     def import_shp(self, filename, table_name, charset="UTF-8", srid=-1,
@@ -522,6 +524,32 @@ class SpatiaLiteDB(SQLiteDB):
     def __repr__(self):
         return self.__str__()
 
+
+# TODO: SQL function?
+'''
+def RegisterSpatialView(self, view_name, view_geometry, f_table_name,
+                        f_geometry_column, view_rowid="rowid"):
+    """Register a spatial view.
+    Args:
+        view_name (str): name of view to register
+        view_geometry (str): geometry column name of view
+        f_table_name (str): name of table the view references to get geom
+        f_geometry_column (str): name of geometry column in f_table
+
+    Available as scalar 'RegisterSpatialView'.
+    """
+    # Resource: www.gaia-gis.it/spatialite-3.0.0-BETA/spatialite-cookbook
+    # /html/sp-view.html
+    sql = ("INSERT INTO views_geometry_columns "
+           " (view_name, view_geometry, view_rowid, f_table_name, "
+           "  f_geometry_column, read_only) "
+           " VALUES ('{}', '{}', '{}', '{}', '{}', 1);")
+    sql = unicode(sql.format(view_name, view_geometry, view_rowid,
+                             f_table_name, f_geometry_column))
+    self.cur.execute(sql)
+    code = self.cur.fetchone()
+    return code
+'''
 
 # TODO: make SpatialDB superclass or abstract class(?)
 '''
