@@ -583,9 +583,10 @@ class SQLiteDB(DB):
     extensions: list
         List of extensions to load on connection
     """
-    def __init__(self, dbname, echo=False, extensions=None, functions=None):
+    def __init__(self, dbname, echo=False, extensions=None, functions=None, pragmas=None):
         self._extensions = extensions
         self._functions = functions
+        self._pragmas = [] if not pragmas else pragmas
         super(SQLiteDB, self).__init__(
             dbname=dbname,
             dbtype="sqlite",
@@ -603,6 +604,8 @@ class SQLiteDB(DB):
         if isinstance(self._extensions, list):
             for ext in self._extensions:
                 conn.load_extension(ext)
+        for pragma in self._pragmas:
+            conn.execute("PRAGMA {}={};".format(pragma[0], pragma[1]))
         # Load Python functions into the database for use in SQL
         if isinstance(self._functions, list):
             for func in self._functions:

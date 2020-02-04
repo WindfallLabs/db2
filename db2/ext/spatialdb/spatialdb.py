@@ -69,11 +69,14 @@ class SpatiaLiteDB(SQLiteDB):
     extensions: list
         List of extensions to load on connection. Default: ['mod_spatialite']
     """
-    def __init__(self, dbname, echo=False, extensions=[MOD_SPATIALITE]):
+    def __init__(self, dbname, echo=False, extensions=[MOD_SPATIALITE],
+                 functions=None, pragmas=None):
         super(SpatiaLiteDB, self).__init__(
             dbname=dbname,
             echo=echo,
-            extensions=extensions)
+            extensions=extensions,
+            functions=functions,
+            pragmas=pragmas)
 
         self.relaxed_security = os.environ["SPATIALITE_SECURITY"]
 
@@ -254,7 +257,8 @@ class SpatiaLiteDB(SQLiteDB):
         df = self.sql(
             "SELECT ImportSHP(?,?,?,?,?,?,?,?,?,?,?);",
             (filename, table_name, charset, srid, geom_column, pk_column,
-             geom_type, coerce2D, compressed, spatial_index, text_dates))
+             geom_type, int(coerce2D), int(compressed), int(spatial_index),
+             int(text_dates)))
         if table_name not in self.table_names:
             # TODO: Hopefully this can someday be more helpful
             raise SpatiaLiteError("import failed")
@@ -367,11 +371,24 @@ class SpatiaLiteDB(SQLiteDB):
                 ).fetchone()
 
             # Set crs attribute of GeoDataFrame
-            if auth != "epsg":
-                df.crs = fiona.crs.from_string(proj)
-            else:
-                df.crs = fiona.crs.from_epsg(srid)
+            df.crs = self.get_crs(srid)
         return df
+
+    def get_crs(self, srid):
+        """
+        Get the coordinate reference system (GeoPandas format) for the input
+        spatial reference ID.
+        """
+        auth, proj = self.sql("SELECT auth_name AS auth, proj4text AS proj "
+                              "FROM spatial_ref_sys "
+                              "WHERE auth_srid = ?",
+                              (srid,)).iloc[0]
+        # Set crs attribute of GeoDataFrame
+        if auth != "epsg":
+            crs = fiona.crs.from_string(proj)
+        else:
+            crs = fiona.crs.from_epsg(srid)
+        return crs
 
     def create_table_as(self, table_name, sql, srid=None, **kwargs):  # TODO: add tests
         """
