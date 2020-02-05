@@ -16,19 +16,18 @@ CHINOOK = "tests/chinook.sqlite"
 class TestSQLite(unittest.TestCase):
     def test_attach_and_detach(self):
         d = SQLiteDB(":memory:")
+        full_path = os.path.abspath(CHINOOK)
         # Attach
         d.attach_db(CHINOOK)
         self.assertEqual(
             d.databases["file"].tolist(),
-            [":memory:", "tests/chinook.sqlite"])
+            ["", full_path])
         self.assertEqual(
             d.databases["name"].tolist(),
             ["main", "chinook"])
         # Detach
         d.detach_db("chinook")
-        self.assertEqual(
-            d.databases["file"].tolist(),
-            [":memory:"])
+        self.assertEqual(d.databases["file"].tolist(), [""])
 
     def test_decimal_adapter(self):
         d = SQLiteDB(":memory:")

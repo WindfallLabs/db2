@@ -395,7 +395,7 @@ class DB(object):
             sql = self._apply_handlebars(sql, data)
             if self._echo:
                 print(sql)
-            rprox = self.engine.execute(sql)
+            rprox = self.con.execute(sql)
 
         # Use placeholders/variables
         elif data is not None:
@@ -409,21 +409,21 @@ class DB(object):
                         s = self._apply_handlebars(sql, dat)  # TODO: log SQL
                         if self._echo:
                             print(sql)
-                        rprox = self.engine.execute(s)
+                        rprox = self.con.execute(s)
                     else:
                         if self._echo:
                             print(sql)
-                        rprox = self.engine.execute(sql, dat)
+                        rprox = self.con.execute(sql, dat)
             # Execute single with placeholders/variables
             else:
                 if self._echo:
                     print(sql)
-                rprox = self.engine.execute(sql, data)
+                rprox = self.con.execute(sql, data)
         else:
             # Execute single statement without placeholders/variables
             if self._echo:
                 print(sql)
-            rprox = self.engine.execute(sql)
+            rprox = self.con.execute(sql)
 
         # Get column names
         columns = rprox.keys()
@@ -593,11 +593,6 @@ class SQLiteDB(DB):
             dbtype="sqlite",
             echo=echo)
 
-        # Similar functionality to sqlite command ".databases"
-        self.databases = pd.DataFrame(
-            OrderedDict([("name", "main"), ("file", self.dbname)]),
-            index=[0])
-
     def _on_connect(self, conn, _):
         """Get DBAPI2 Connection and load all specified extensions."""
         conn.isolation_level = None
@@ -614,6 +609,15 @@ class SQLiteDB(DB):
                 utils.make_sqlite_function(conn, func)
         return
 
+    @property
+    def databases(self):
+        r = self.con.execute("PRAGMA database_list;")
+        columns = r.keys()
+        df = pd.DataFrame([], columns=columns)
+        for row in r:
+            df = df.append(pd.DataFrame([row], columns=columns))
+        return df.reset_index(drop=True)
+
     def attach_db(self, db_path, name=None):
         """
         Attaches a database with ``ATTACH DATABASE :file AS :name;``.
@@ -625,36 +629,29 @@ class SQLiteDB(DB):
         name: str default: None
             Name or alias of the attached database
 
-        Returns
-        -------
-        The fetched cursor result.
         """
         # Clean path
         db_path = db_path.replace("\\", "/")
+        if not os.path.exists(db_path):
+            raise AttributeError("Database path does not exist")
         # Default name to filename
         if name is None:
             name = os.path.basename(db_path).split(".")[0]
-        self.engine.execute("ATTACH :file AS :name;",
-                            {"file": db_path, "name": name})
-
-        # Append alias and path to self.databases dataframe
-        self.databases.loc[len(self.databases)] = [name, db_path]
-        return 1
+        # NOTE: this must use self.con
+        return self.sql("ATTACH :file AS :name;",
+                        {"file": db_path, "name": name})
 
     def detach_db(self, name):
         """
         Detaches an attached database by name via ``DETACH DATABASE :name;``.
         """
-        self.engine.execute("DETACH DATABASE :name;", {"name": name})
-
-        # Remove the alias from self.databases dataframe
-        self.databases.drop(
-            self.databases[self.databases["name"] == name].index,
-            inplace=True)
-        return 1
+        # NOTE: this must use self.con
+        return self.sql("DETACH DATABASE :name;", {"name": name})
 
     def create_index(self, table_name, column_name):
-        """Creates an index on table.column."""
+        """
+        Creates an index on table.column.
+        """
         s = "CREATE INDEX idx_{{ tbl }}_{{ col }} ON {{ tbl }} ({{ col }});"
         data = {"tbl": table_name, "col": column_name}
         return self.sql(s, data)
