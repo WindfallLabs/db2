@@ -472,11 +472,13 @@ class SpatiaLiteDB(SQLiteDB):
         if geom_type == "SAME":  # TODO: geom_type should just be multi/single
             geom_type = self.sql(
                 "SELECT DISTINCT GeometryType(geometry) AS dims "
-                "FROM ufda_regions")["dims"].iat[0].split(" ")[0]
+                "FROM {{ table_name }}",
+                data={"table_name": table_name})["dims"].iat[0].split(" ")[0]
 
         if dims == "SAME":
             dims = self.sql("SELECT DISTINCT CoordDimension(geometry) AS dims "
-                            "FROM {{ table_name }}")["dims"].iat[0]
+                            "FROM {{ table_name }}",
+                            data={"table_name": table_name})["dims"].iat[0]
             cast_dims = None
         else:
             # NOTE: str format; not an injection threat since dims are in list

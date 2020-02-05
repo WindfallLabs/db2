@@ -583,7 +583,8 @@ class SQLiteDB(DB):
     extensions: list
         List of extensions to load on connection
     """
-    def __init__(self, dbname, echo=False, extensions=None, functions=None, pragmas=None):
+    def __init__(self, dbname, echo=False, extensions=None, functions=None,
+                 pragmas=None):
         self._extensions = extensions
         self._functions = functions
         self._pragmas = [] if not pragmas else pragmas
@@ -628,6 +629,8 @@ class SQLiteDB(DB):
         -------
         The fetched cursor result.
         """
+        # Clean path
+        db_path = db_path.replace("\\", "/")
         # Default name to filename
         if name is None:
             name = os.path.basename(db_path).split(".")[0]

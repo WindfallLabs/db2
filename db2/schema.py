@@ -88,11 +88,14 @@ class TableSchema(object):
         return df_to_prettytable(self.table_schema, self.name)
 
 
-class Schema(object):
+class Schema(object):  # TODO: use Inspector class and refactor
     def __init__(self, database):
         """
-        Provides a container for table schema objects.
+        A subclass of sqlalchemy's Inspector class, which performs database
+        schema inspection. This subclass also acts as a container for table
+        schema objects.
         """
+        # TODO: super(Schema, self).__init__(self, database.engine)
         self._d = database
         self._loaded = False
 
