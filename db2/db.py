@@ -673,7 +673,7 @@ class SQLiteDB(DB):
         None
         """
         df = self.sql(sql)
-        self.load_dataframe(df, table_name)
+        self.load_dataframe(df, table_name, **kwargs)
         return
 
     def __str__(self):

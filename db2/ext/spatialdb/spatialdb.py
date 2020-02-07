@@ -412,7 +412,7 @@ class SpatiaLiteDB(SQLiteDB):
         df = self.sql(sql)
         if srid is not None:  # "geometry" in df.columns or "wkt" in df.columns:
             return self.load_geodataframe(df, table_name, srid, **kwargs)
-        return self.load_dataframe(df, table_name)
+        return self.load_dataframe(df, table_name, **kwargs)
 
     @property
     def geometries(self):
