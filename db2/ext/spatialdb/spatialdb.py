@@ -41,6 +41,7 @@ GEOM_TYPES = {
     1: "POINT",
     2: "LINESTRING",
     3: "POLYGON",
+    4: "MULTIPOINT",
     # ...
     6: "MULTIPOLYGON"
     }
@@ -308,6 +309,8 @@ class SpatiaLiteDB(SQLiteDB):
         geom_data = self.get_geometry_data(table_name)
         if geom_type == "AUTO":
             geom_type = GEOM_TYPES[geom_data["geometry_type"]]
+            # TODO: Bug found: "KeyError: 4" -- 4 found with "AUTO" and 4 was
+            # not in GEOM_TYPES; GEOM_TYPES really should be better
         # Execute
         df = self.sql(
             "SELECT ExportSHP(?,?,?,?);",
@@ -363,12 +366,15 @@ class SpatiaLiteDB(SQLiteDB):
             df = gpd.GeoDataFrame(df)
 
             # Get spatial reference authority and proj4text
-            auth, proj = self.engine.execute(
-                ("SELECT auth_name, proj4text "
-                 "FROM spatial_ref_sys "
-                 "WHERE auth_srid = ?"),
-                (srid,)
-                ).fetchone()
+            try:
+                auth, proj = self.engine.execute(
+                    ("SELECT auth_name, proj4text "
+                     "FROM spatial_ref_sys "
+                     "WHERE auth_srid = ?"),
+                    (srid,)
+                    ).fetchone()
+            except TypeError:
+                raise SpatiaLiteError("srid not found: {}".format(srid))
 
             # Set crs attribute of GeoDataFrame
             df.crs = self.get_crs(srid)
@@ -456,7 +462,7 @@ class SpatiaLiteDB(SQLiteDB):
         if set([srid, geom_type, dims, not_null]) == {"SAME"}:
             raise AttributeError("No changes will be made")
         if table_name not in self.geometries["f_table_name"].tolist():
-            raise AttributeError("Not a spatial table")
+            raise AttributeError("Not a spatial table: {}".format(table_name))
         if dims not in ("SAME", "XY", "XYZ", "XYM", "XYZM"):
             raise AttributeError("Not a valid dimension")
 
