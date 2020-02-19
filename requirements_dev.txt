@@ -15,6 +15,3 @@ pandas
 sqlparse
 pymssql
 sqlalchemy
-fiona
-shapely
-geopandas

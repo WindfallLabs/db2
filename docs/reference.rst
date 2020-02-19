@@ -21,10 +21,10 @@ db2.utils
     :undoc-members:
     :show-inheritance:
 
-db2.ext.spatialdb
------------------
+db2.schema
+----------
 
-.. automodule:: db2.ext.spatialdb.spatialdb
+.. automodule:: db2.schema
     :members:
     :undoc-members:
     :show-inheritance:

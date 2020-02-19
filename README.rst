@@ -18,7 +18,7 @@ About db2.py
      :alt: Updates
 
 
-**NOTE** This version (v0.0.1) is not yet ready for public consumption,
+**NOTE** This version (v0.0.2) is not yet ready for public consumption,
 please use caution and expect frequent changes.  
 
 
@@ -30,9 +30,10 @@ with your databases."
 It is built to support interactive programming and data analysis.  
 
 Truthfully, I'm sharing this project as a side effect. My personal interests
-in developing db2 stems from my needs to work with spatial databases. I needed
-some major modifications to db.py to make SpatiaLite work with ``geopandas``.
-I hope that this project may help others with their needs as well.
+in developing db2 stems from my needs to work with spatial databases
+(see my SpatialDB project). I needed some major modifications
+to db.py to make SpatiaLite work with ``geopandas``. I hope that this
+project may help others with their needs as well.
 
 
 Features

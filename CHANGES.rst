@@ -20,32 +20,19 @@ Core db2.py:
     * etc.
 * [ ] IPython/Jupyter Notebook support
 * [ ] I/O of MS Excel files (export to named sheets, etc.)
-
-
-SpatialDB:
-
-* [ ] Instructions for installing GDAL, fiona, shapely, geopandas, etc. etc.
-    * Compiling sqlite with RTree
-    * Compiling SpatiaLite
-    * Can we do all this in a Docker container?
-* [ ] Seemless I/O of ESRI-compatible, and really ugly shapefiles
-    * .prj files
-    * Unicode encoding tests
-* [ ] ``CloneTable``, ``DropGeoTable``, and ``reproject`` methods
-* [ ] Variable names are standardized between (geo)pandas, SpatiaLite, SQLite, etc.  
-
-
-Both:
-
 * [ ] A good amount of examples
 
 
+Version 0.0.2 (February 2020)
+-----------------------------
+
+* Split db2 project from SpatialDB project
+
 
 Version 0.0.1 (January, 2020)
------------------------------------
+-----------------------------
 
 Differences between db.py and db2.py:
-
 
 * Reconfigured ``DB`` object for use as a superclass for other database subclasses (e.g. ``SQLiteDB``)
     * Removed ``DB.__init__`` parameter ``filename`` (SQLite only) in favor for ``dbname``
@@ -72,16 +59,4 @@ New in db2.py:
 * Added SQLAlchemy ``listen`` call to ``DB.__init__``
     * Now supports loading SQLite extensions on ``connect()``
 * Created ``db2.ext`` library to house non-core code (extensions)
-* Created ``db2.ext.spatialdb`` extension (my reason for taking this project on)
-    * Added ``get_sr_from_web`` to get srs data from spatialreference.org_
-    * Added ``SpatiaLiteBlobElement`` to handle Blob geometry decoding
-    * Added ``SpatiaLiteDB`` subclass of ``db2.SQLiteDB``
-        * Added ``SpatiaLiteDB.geometries`` property to quickly get spatial table information
-        * Added ``SpatiaLiteDB.load_geodataframe`` to CREATE and INSERT data into the database from ``geopandas.GeoDataFrame`` objects
-            * Checks and handles for single geometry type integrity
-        * Altered ``SpatiaLiteDB.sql()`` to return a valid GeoDataFrame
-            * Automatically converts SpatiaLite Blob geometries to shapely
-            * Sets ``GeoDataFrame.crs`` attribute 
 
-
-.. _spatialreference.org: https://www.spatialreference.org
