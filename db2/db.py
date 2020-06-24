@@ -365,16 +365,21 @@ class DB(object):
                 sql = d._apply_handlebars(sql, data, union=True)
                 return pd.read_sql(sql, d.engine)
 
-            # Let statements with "end;" in them slip
-            if "end;" in sql.lower():
-                #print("This is new!")
-                d.con.execute(sql)
-                return pd.DataFrame(None, columns=["SQL", "Result"])
+            # Append floating 'END;' statements to the statements preceding them
+            lower_parsed = [i.value.strip().lower() for i in parsed]
+            if "end;" in lower_parsed:
+                indices = [i for i, x in enumerate(lower_parsed) if x == "end;"]
+                indices.sort(reverse=True)
+                parsed_list = list(parsed)
+                for i in indices:
+                    parsed_list[i-1].value += "\nEND;"
+                    parsed_list.pop(i)
+                parsed = tuple(parsed_list)
+                    
             # Iterate over statements passed. Single statements that iterate
             # over data (executemany) will occur inside the sqlfunc
-            else:
-                for stmt in parsed:
-                    dfs.append(sqlfunc(d, stmt.value, data))
+            for stmt in parsed:
+                dfs.append(sqlfunc(d, stmt.value, data))
             # If a select query is in the tuple of parsed statements, we don't
             # want to concat with a success DataFrame showing SQL and Result
             try:
