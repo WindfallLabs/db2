@@ -27,8 +27,8 @@ from sqlalchemy.event import listen
 from sqlalchemy.exc import ResourceClosedError
 from sqlalchemy.ext.declarative import declarative_base
 
-import utils
-from schema import Schema
+from . import utils
+from .schema import Schema
 
 
 __all__ = [
@@ -365,10 +365,16 @@ class DB(object):
                 sql = d._apply_handlebars(sql, data, union=True)
                 return pd.read_sql(sql, d.engine)
 
+            # Let statements with "end;" in them slip
+            if "end;" in sql.lower():
+                #print("This is new!")
+                d.con.execute(sql)
+                return pd.DataFrame(None, columns=["SQL", "Result"])
             # Iterate over statements passed. Single statements that iterate
             # over data (executemany) will occur inside the sqlfunc
-            for stmt in parsed:
-                dfs.append(sqlfunc(d, stmt.value, data))
+            else:
+                for stmt in parsed:
+                    dfs.append(sqlfunc(d, stmt.value, data))
             # If a select query is in the tuple of parsed statements, we don't
             # want to concat with a success DataFrame showing SQL and Result
             try:

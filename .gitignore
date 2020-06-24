@@ -104,5 +104,8 @@ ENV/
 # IDE settings
 .vscode/
 
+# Other
+.idea/
+
 # Test Databases
 *test_*.sqlite

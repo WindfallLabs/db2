@@ -6,7 +6,7 @@ Classes for interactively exploring tables.
 import pandas as pd
 from sqlalchemy import select, func, MetaData
 
-from utils import df_to_prettytable
+from .utils import df_to_prettytable
 
 
 __all__ = ["TableSchema"]
