@@ -115,6 +115,11 @@ class TestSQL(unittest.TestCase):
         r = self.d.sql("SELECT * FROM test")
         self.assertTrue(r["name"].tolist() == ["One", "Two"])
 
+    def test_many_from_file(self):
+        self.create_test_table()
+        r = self.d.execute_script_file("./tests/many_statements.sql")
+        self.assertTrue(len(r) == 11)
+
     def test_single_select_novars(self):
         self.create_test_table()
         self.d.sql("INSERT INTO test VALUES (1, 'One'); "
